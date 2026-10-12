@@ -21,6 +21,17 @@ python3 gen.py            # 拉订阅 → out/sing-box.json
 
 `config.local.yaml`（不入库，权限 600）：`subscription_url`、`clash_api_secret`、`hk_outbound`（从 v2rayN 原配置快照）。
 
+## 安装为系统服务（含 TUN）
+
+```bash
+sudo ./install.sh     # 装到 /usr/local/{libexec,etc,var}/neu-v6-router，LaunchDaemon com.nk.neu-v6-router
+./update.sh           # 改了订阅后：重新生成并热更新
+sudo ./uninstall.sh   # 回滚（之后重新打开 FlClash）
+```
+
+安装前需停止 v2rayN 核心并退出 FlClash（端口 10808/10809/9090 不能被占）。日志：`/usr/local/var/neu-v6-router/sing-box.log`。
+TUN 同时接管 v4/v6；`auto_detect_interface` 让自身出站绑物理网卡防环路；国外域名用 fakeip。
+
 ## 关键坑
 
 - 国内 CDN 只对 **v6 来源** 的 DNS 查询返回 AAAA，所以国内解析用 `2400:3200::1`。
