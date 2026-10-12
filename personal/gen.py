@@ -29,6 +29,7 @@ DEFAULTS = {
     "cn_dns_v6": "2400:3200::1",  # 国内 CDN 只对 v6 来源的查询返回 AAAA
     "cn_dns_v4": "223.5.5.5",
     "direct_domains": ["neu.edu.cn"],
+    "tun": True,
     "rule_set_base": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo",
     "ui_url": "https://github.com/Zephyruso/zashboard/releases/latest/download/dist.zip",
 }
@@ -145,6 +146,15 @@ def build(settings, sub):
         "download_detour": ABROAD, "update_interval": "7d"}
     v6_any = {"ip_cidr": ["::/0"]}
 
+    inbounds = [
+        {"type": "mixed", "tag": "main", "listen": s["listen"], "listen_port": s["main_port"]},
+        {"type": "mixed", "tag": "hk", "listen": s["listen"], "listen_port": s["hk_port"]},
+    ]
+    if s["tun"]:
+        # v4/v6 都接管：否则国外站的 v6 会绕过代理从校园网直出
+        inbounds.append({"type": "tun", "tag": "tun", "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+                         "auto_route": True, "strict_route": True, "stack": "mixed"})
+
     return {
         "log": {"level": "warn", "timestamp": True},
         "dns": {
@@ -152,14 +162,18 @@ def build(settings, sub):
                 {"type": "udp", "tag": "cn6", "server": s["cn_dns_v6"]},
                 {"type": "udp", "tag": "cn4", "server": s["cn_dns_v4"]},
                 {"type": "https", "tag": "remote", "server": "1.1.1.1", "detour": ABROAD},
+                {"type": "fakeip", "tag": "fakeip", "inet4_range": "198.18.0.0/15", "inet6_range": "fc00::/18"},
             ],
-            "rules": [{"rule_set": ["geosite-cn"], "server": "cn6"}],
+            "rules": [
+                {"domain_suffix": s["direct_domains"], "server": "cn4"},
+                {"rule_set": ["geosite-cn"], "server": "cn6"},
+                # 国外域名给 fakeip，连接时由代理端解析，省去本地查询绕国外的延迟
+                {"query_type": ["A", "AAAA"], "server": "fakeip"},
+            ],
             "final": "remote",
+            "independent_cache": True,
         },
-        "inbounds": [
-            {"type": "mixed", "tag": "main", "listen": s["listen"], "listen_port": s["main_port"]},
-            {"type": "mixed", "tag": "hk", "listen": s["listen"], "listen_port": s["hk_port"]},
-        ],
+        "inbounds": inbounds,
         "outbounds": outbounds,
         "route": {
             "rule_set": [rs("geosite-cn", "geosite", "cn"), rs("geoip-cn", "geoip", "cn")],
@@ -179,9 +193,11 @@ def build(settings, sub):
             ],
             "final": ABROAD,
             "default_domain_resolver": "cn4",
+            # 出站绑定物理网卡，避免自身连接被 TUN 抓回形成环路
+            "auto_detect_interface": True,
         },
         "experimental": {
-            "cache_file": {"enabled": True, "path": "neu-v6-router.cache.db"},
+            "cache_file": {"enabled": True, "path": "neu-v6-router.cache.db", "store_fakeip": True},
             "clash_api": {
                 "external_controller": s["clash_api"],
                 "secret": s["clash_api_secret"],
@@ -198,8 +214,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-c", "--config", default=ROOT / "config.local.yaml")
     ap.add_argument("-o", "--out", default=ROOT / "out" / "sing-box.json")
+    ap.add_argument("--no-tun", action="store_true", help="不生成 TUN 入口（仅系统代理）")
     a = ap.parse_args()
     settings = yaml.safe_load(open(a.config, encoding="utf-8"))
+    if a.no_tun:
+        settings["tun"] = False
     # 用系统 curl（走系统证书库）直连拉订阅；python.org 版 Python 默认没有根证书
     raw = subprocess.run(["curl", "-fsS", "-m", "20", "--noproxy", "*", "-A", "clash.meta",
                           settings["subscription_url"]], check=True, capture_output=True).stdout
