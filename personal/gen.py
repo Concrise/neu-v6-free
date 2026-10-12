@@ -2,9 +2,9 @@
 """把妙妙屋「自用东大版」订阅（mihomo 格式）转成 sing-box 配置 + 面板分组说明。
 
 东大校园网三层分流：
-  ① 国内域名解析出 v6（经 v6 DNS 查询）→ 🇨🇳 国内v6（默认直连）
-  ② 其余国内                          → 🇨🇳 国内v4（默认 免流入口，即经 Oracle v6 出 v4）
-  ③ 国外                              → 🌍 国外（默认 家宽Sixtynet，挂在 免流入口 上）
+  ① 国内域名解析出 v6（经 v6 DNS 查询）→ ③ 国内·有IPv6（默认本机 v6 直连）
+  ② 其余国内                          → ④ 国内·仅IPv4（默认 Oracle 美国出口，即经 ① 免流隧道从 Oracle 出 v4）
+  ③ 国外                              → ② 国外出口（默认 [免流] 美国家宽 Sixtynet）
 业务分组与优先级见 groups.py。另有独立入口 hk（10809）固定走 HK家宽。
 
 用法：python3 gen.py [-o out/sing-box.json] [--no-tun] [--rules-dir DIR] [--panel-dir DIR]
@@ -20,8 +20,8 @@ import urllib.parse
 
 import yaml
 
-from groups import (ABROAD, BASE_GROUPS, CN4, CN6, D_ANY, D_V4, D_V6, D_V6PREF, ENTRY, INFO_PAGES,
-                    OPTION_NOTES, SERVICE_GROUPS, V4_SUFFIX)
+from groups import (ABROAD, BASE_GROUPS, CN4, CN6, D_ANY, D_V4, D_V6, D_V6PREF, DISPLAY_NAMES, ENTRY, FREE,
+                    INFO_PAGES, OPTION_NOTES, ORACLE_EXIT, SERVICE_GROUPS, V4)
 
 ROOT = pathlib.Path(__file__).resolve().parent
 INSTALL_ETC = "/usr/local/etc/neu-v6-router"
@@ -153,7 +153,7 @@ def build(settings, sub):
     s = {**DEFAULTS, **settings}
     entries = s["entries"]
 
-    nodes, landings = [], []
+    raw = {}  # 订阅名 → sing-box outbound（tag 暂为订阅名）
     for p in sub["proxies"]:
         if p["type"] in SKIP_TYPES or re.search(s["exclude_nodes_regex"], p["name"]):
             continue
@@ -163,26 +163,40 @@ def build(settings, sub):
             continue
         if p.get("dialer-proxy"):
             o["detour"] = SUB_GROUP_ALIAS.get(p["dialer-proxy"], p["dialer-proxy"])
-        nodes.append(o)
-        if p["name"] not in entries:
-            landings.append(p["name"])
-    # 挂在免流入口上的落地，各生成一个去掉前置的 v4 直连副本
-    v4_nodes = [dict(n, tag=n["tag"] + V4_SUFFIX) for n in nodes if n.get("detour") == ENTRY]
-    for n in v4_nodes:
-        n.pop("detour")
-    v4_landings = [n["tag"] for n in v4_nodes]
-    known = {n["tag"] for n in nodes + v4_nodes}
-    missing = [e for e in entries + [s["default_landing"]] if e not in known]
+        raw[p["name"]] = o
+    missing = [e for e in entries + [s["default_landing"]] if e not in raw]
     if missing:
         sys.exit(f"订阅里缺少节点: {missing}")
 
+    def via_entry(name, seen=()):
+        d = raw[name].get("detour")
+        return d == ENTRY or (d in raw and d not in seen and via_entry(d, seen + (name,)))
+
+    # 统一命名：入口用显示名；第一跳走 ① 的加 [免流]，其余（本机直连）加 [v4直连]
+    disp = lambda n: DISPLAY_NAMES.get(n, n)  # noqa: E731
+    tag = {n: disp(n) if n in entries else (FREE if via_entry(n) else V4) + disp(n) for n in raw}
+    nodes = []
+    for n, o in raw.items():
+        o["tag"] = tag[n]
+        if o.get("detour") in tag:
+            o["detour"] = tag[o["detour"]]
+        nodes.append(o)
+    landings = [tag[n] for n in raw if n not in entries]
+    # 第一跳直接是 ① 的落地，再各生成一个本机 v4 直连的副本
+    v4_nodes = [dict(raw[n], tag=V4 + disp(n)) for n in raw if raw[n].get("detour") == ENTRY]
+    for n in v4_nodes:
+        n.pop("detour")
+    v4_landings = [n["tag"] for n in v4_nodes]
+    entry_tags = [tag[e] for e in entries]
+
     hk = dict(s["hk_outbound"])
-    service_members = [ABROAD, ENTRY, CN6, CN4, D_V6PREF, D_V4, *landings, *v4_landings]
+    service_members = [ABROAD, ORACLE_EXIT, CN6, CN4, D_V6PREF, D_V4, *landings, *v4_landings]
     outbounds = [
-        selector(ENTRY, entries + [D_ANY], entries[0]),
-        selector(ABROAD, landings + v4_landings, s["default_landing"]),
-        selector(CN6, [D_V6, D_V6PREF, ENTRY], D_V6),
-        selector(CN4, [ENTRY, D_V4, D_V6PREF], ENTRY),
+        selector(ENTRY, entry_tags + [D_ANY], entry_tags[0]),
+        selector(ABROAD, landings + v4_landings, tag[s["default_landing"]]),
+        selector(CN6, [D_V6, D_V6PREF, ORACLE_EXIT], D_V6),
+        selector(CN4, [ORACLE_EXIT, D_V4, D_V6PREF], ORACLE_EXIT),
+        selector(ORACLE_EXIT, [ENTRY], ENTRY),
         *[selector(name, service_members, default) for name, _, _, default, _ in SERVICE_GROUPS],
         *nodes,
         *v4_nodes,
@@ -277,17 +291,16 @@ def node_notes(cfg, entries):
     notes = {}
     for o in cfg["outbounds"]:
         t = o["tag"]
-        if o["type"] in ("selector", "direct") or t in OPTION_NOTES:
+        if o["type"] in ("selector", "direct") or t in OPTION_NOTES or t == "HK家宽":
             continue
         if t in entries:
-            notes[t] = "Oracle 的 v6 入口（免流第一跳）"
+            notes[t] = "通过校园网 IPv6 连到 Oracle（隧道入口，免费）"
         elif via_entry(t):
             hop = o["detour"]
-            notes[t] = "经免流入口到此落地（免费）" if hop == ENTRY else f"经「{hop}」（其前置走免流入口）到此落地（免费）"
-        elif t.endswith(V4_SUFFIX):
-            notes[t] = "本机 v4 直连到此落地（计费，延迟低）"
+            notes[t] = "先走 ① 免流隧道，再到此落地（免费）" if hop == ENTRY else \
+                f"先走 ① 免流隧道，经「{hop}」再到此落地（免费）"
         else:
-            notes[t] = "本机直连此节点（不经免流入口，计费）"
+            notes[t] = "本机直接用 IPv4 连到此落地（不走隧道，延迟低、计费）"
     return notes
 
 
@@ -299,7 +312,8 @@ def panel_meta(cfg, entries):
         + [{"name": n, "desc": d, "kind": "service", "default": dft} for n, d, _, dft, _ in SERVICE_GROUPS],
         "info": [{"name": n, "desc": d} for n, d in INFO_PAGES],
         "notes": OPTION_NOTES,
-        "v4_suffix": V4_SUFFIX,
+        "free_prefix": FREE,
+        "v4_prefix": V4,
     }
 
 
@@ -332,6 +346,7 @@ def main():
     panel.mkdir(parents=True, exist_ok=True)
     shutil.copy(ROOT / "panel" / "index.html", panel / "index.html")
     entries = settings.get("entries", DEFAULTS["entries"])
+    entries = [DISPLAY_NAMES.get(e, e) for e in entries]
     (panel / "groups.json").write_text(json.dumps(panel_meta(cfg, entries), ensure_ascii=False, indent=1),
                                        encoding="utf-8")
     sel = {o["tag"]: o["default"] for o in cfg["outbounds"] if o["type"] == "selector"}

@@ -151,11 +151,14 @@ function renderGroup(name) {
   for (const n of p.all) {
     const t = proxies[n]?.type;
     if (t === "Selector") kinds.follow.push(n);
-    else if (t === "Direct" || /^直连/.test(n)) kinds.direct.push(n);
-    else if (n.endsWith(meta.v4_suffix)) kinds.v4.push(n);
+    else if (t === "Direct") kinds.direct.push(n);
+    else if (n.startsWith(meta.v4_prefix)) kinds.v4.push(n);
     else kinds.free.push(n);
   }
-  const titles = { follow: "跟随其他分组", direct: "本机直连", free: "节点", v4: "节点 · 本机 v4 直连（计费）" };
+  const titles = { follow: "跟随其他分组 / 出口", direct: "本机直连（不走隧道）", free: "节点",
+    v4: "[v4直连] 节点：本机直接用 IPv4 连过去（延迟低、计费）" };
+  if (name === "① 免流隧道") titles.free = "隧道入口（通过校园网 IPv6 连到 Oracle）";
+  else titles.free = "[免流] 节点：先走 ① 免流隧道，再到该落地（免费）";
   for (const k of ["follow", "direct", "free", "v4"]) {
     if (!kinds[k].length) continue;
     main.append($(`<div class="subhead">${titles[k]}</div>`));
@@ -197,17 +200,20 @@ function renderInfo(name) {
 function renderHelp() {
   const svc = meta.groups.filter((g) => g.kind === "service").map((g) => `<li><b>${esc(g.name)}</b>：${esc(g.desc)}</li>`).join("");
   document.querySelector("main").innerHTML = `<div class="head"><h2>📖 分流说明</h2></div>
-  <p class="desc">每个连接从上往下匹配，<b>命中第一条就停</b>，所以分组之间不会冲突。业务分组里选「🌍 国外」等于跟随国外分组，
-  改一处就能让多个业务一起变。</p>
+  <p class="desc">每个连接从上往下匹配，<b>命中第一条就停</b>，所以分组之间不会冲突。<br>
+  一条连接 = <b>第一跳</b>（① 免流隧道 决定怎么离开校园网）+ <b>出口</b>（各分组决定最后从哪出去）。<br>
+  命名：<b>[免流]</b> 先走隧道再到该落地（免费）；<b>[v4直连]</b> 本机直接用 IPv4 连（计费）；
+  <b>Oracle 美国出口</b> 走隧道后直接从 Oracle 出去；<b>本机直连·…</b> 不走隧道。<br>
+  业务分组选「② 国外出口」等于跟随它，改一处多个业务一起变。</p>
   <ol class="prio">
     <li>端口 10809 进来的流量 → 固定 HK 家宽（指纹浏览器专用）</li>
     <li>局域网、校园网（neu.edu.cn）→ 直连</li>
     <li>按进程：豆包输入法、微信 → 各自分组</li>
     <li>按网站：业务分组（见下），优先级与左侧顺序相同（海外游戏除外）</li>
-    <li>其余国内网站：查得到 v6 → 🇨🇳 国内v6；只有 v4 → 🇨🇳 国内v4</li>
+    <li>其余国内网站：查得到 IPv6 → ③ 国内·有IPv6；只有 IPv4 → ④ 国内·仅IPv4</li>
     <li>🎯 海外游戏（国内游戏已在上一步处理）</li>
-    <li>直接访问国内 IP → 同样按 v6/v4 分</li>
-    <li>剩下的全部 → 🌍 国外</li>
+    <li>直接访问国内 IP → 同样按 IPv6/IPv4 分</li>
+    <li>剩下的全部 → ② 国外出口</li>
   </ol>
   <div class="subhead">业务分组</div><ul>${svc}</ul>`;
 }
