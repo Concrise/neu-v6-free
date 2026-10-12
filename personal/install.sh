@@ -27,6 +27,10 @@ install -d -o root -g wheel -m 755 "$BIN_DIR" "$ETC_DIR"
 install -d -o root -g wheel -m 700 "$VAR_DIR"
 install -o root -g wheel -m 755 "$SRC_BIN" "$BIN_DIR/sing-box"
 install -o root -g wheel -m 600 "$SRC_CFG" "$ETC_DIR/config.json"
+install -d -o root -g wheel -m 755 "$ETC_DIR/rules"
+install -o root -g wheel -m 644 "$ROOT"/out/rules/*.srs "$ETC_DIR/rules/"
+install -d -o root -g wheel -m 755 "$ETC_DIR/panel"
+install -o root -g wheel -m 644 "$ROOT"/out/panel/* "$ETC_DIR/panel/"
 "$BIN_DIR/sing-box" check -c "$ETC_DIR/config.json"
 
 cat > "$PLIST" <<EOF

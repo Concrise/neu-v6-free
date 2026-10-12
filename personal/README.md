@@ -10,7 +10,8 @@
 | 入口 `hk`（10809） | HK家宽（v4 直连，给指纹浏览器） | 计费 |
 
 - 主入口 mixed `127.0.0.1:10808`（v2rayN 系统代理端口），HK 入口 `127.0.0.1:10809`。
-- 面板：Clash API `127.0.0.1:9090`，UI `http://127.0.0.1:9090/ui`，secret 在 `config.local.yaml`。
+- 面板：自写单页面板 `panel/index.html`（每个分组单独一页 + 用途说明 + 实时连接），`http://127.0.0.1:9090/ui`，secret 在 `config.local.yaml`。
+- 分组、用途说明与优先级集中在 `groups.py`；规则集由 gen.py 预下载到 `out/rules`（本地规则集，启动不依赖网络）。
 - 离开校园网（无 v6）：在面板把 `免流入口` 切到 `direct`；国内 v6 DNS 不可用时改用 FlClash「自用-」。
 
 ## 用法
