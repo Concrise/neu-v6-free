@@ -61,7 +61,7 @@ SERVICE_GROUPS = [
     ("⌨️ 豆包输入法", "按进程匹配豆包输入法的所有联网。默认「本机直连·仅IPv4」，避免被当成海外 IP。",
      {"process": [r"/DoubaoIme\.app/"]}, D_V4, "before_cn"),
     ("💬 微信", "按进程匹配微信全部流量（含表情包、小程序）。默认「本机直连·IPv6优先」：有 v6 免费，没有则 v4 计费；"
-              "不走 Oracle，避免表情包等资源因海外 IP 加载失败。",
+              "不走隧道，避免表情包等资源因海外 IP 加载失败。",
      {"process": [r"/微信\.app/", r"/WeChat\.app/"]}, D_V6PREF, "before_cn"),
     ("🤖 AI", "ChatGPT、Claude、Gemini、Perplexity 等海外 AI 服务。默认「[v4直连] 美国家宽 Sixtynet · 经搬瓦工中转」"
              "（家宽 IP，延迟低，计费）；想省流量可切到 [免流] 版本。",
