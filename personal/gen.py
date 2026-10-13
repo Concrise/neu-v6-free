@@ -231,6 +231,9 @@ def build(settings, sub):
     v6_any = {"ip_cidr": ["::/0"]}
     services = lambda where: [service_rule(m, name) for name, _, m, _, w in SERVICE_GROUPS if w == where]  # noqa: E731
 
+    # 国内站点分组（cn_v4）的规则集不一定都在 geosite-cn 里，一起参与 v6 解析与直连判断
+    cn_sets = ["geosite-cn", *(rs_tag(r) for _, _, m, _, w in SERVICE_GROUPS if w == "cn_v4" for r in m["rule_sets"])]
+
     inbounds = [
         {"type": "mixed", "tag": "main", "listen": s["listen"], "listen_port": s["main_port"]},
         {"type": "mixed", "tag": "hk", "listen": s["listen"], "listen_port": s["hk_port"]},
@@ -251,7 +254,7 @@ def build(settings, sub):
             ],
             "rules": [
                 {"domain_suffix": s["direct_domains"], "server": "cn4"},
-                {"rule_set": ["geosite-cn"], "server": "cn6"},
+                {"rule_set": cn_sets, "server": "cn6"},
                 # 国外域名给 fakeip，连接时由代理端解析，省去本地查询绕国外的延迟
                 {"query_type": ["A", "AAAA"], "server": "fakeip"},
             ],
@@ -270,14 +273,18 @@ def build(settings, sub):
                 # 自己的服务器（SSH、面板等）本机直连，不绕去落地
                 {"ip_cidr": own_servers, "outbound": D_ANY},
                 {"domain_suffix": s["direct_domains"], "outbound": D_ANY},
-                *services("before_cn"),
-                # ① / ②：国内域名先经 v6 DNS 解析，有 v6 地址才直连
-                {"rule_set": ["geosite-cn"], "action": "resolve", "server": "cn6", "strategy": "prefer_ipv6"},
-                {"type": "logical", "mode": "and", "rules": [{"rule_set": ["geosite-cn"]}, v6_any], "outbound": CN6},
+                # 按进程的分组（豆包、微信）最优先：整个 App 一起决定，不拆
+                *[r for r in services("before_cn") if "process_path_regex" in r],
+                # 总原则：国内资源只要有 v6 地址就 v6 直连（免费且最快），排在所有按站点分的分组前面
+                {"rule_set": cn_sets, "action": "resolve", "server": "cn6", "strategy": "prefer_ipv6"},
+                {"type": "logical", "mode": "and", "rules": [{"rule_set": cn_sets}, v6_any], "outbound": CN6},
+                {"type": "logical", "mode": "and", "rules": [{"rule_set": ["geoip-cn"]}, v6_any], "outbound": CN6},
+                *[r for r in services("before_cn") if "process_path_regex" not in r],
+                # 下面都是只有 v4 的连接
+                *services("cn_v4"),
                 {"rule_set": ["geosite-cn"], "outbound": CN4},
                 *services("after_cn"),
-                # 直接访问国内 IP 的连接
-                {"type": "logical", "mode": "and", "rules": [{"rule_set": ["geoip-cn"]}, v6_any], "outbound": CN6},
+                # 直接访问国内 v4 IP 的连接（v6 的已在前面直连）
                 {"rule_set": ["geoip-cn"], "outbound": CN4},
             ],
             "final": ABROAD,

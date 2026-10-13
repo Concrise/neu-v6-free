@@ -1,8 +1,10 @@
 """分组定义：面板展示顺序、用途说明、匹配规则与默认出口。
 
 路由优先级（从上到下，命中即停，因此不会冲突）：
-  HK 入口 → 局域网/校园网 → 按进程（豆包、微信）→ BEFORE_CN 业务分组
-  → 国内域名（有 v6 → 国内v6，否则 国内v4）→ AFTER_CN 业务分组 → 国内 IP → ② 国外出口（兜底）
+  HK 入口 → 局域网/校园网 → 按进程（豆包、微信）
+  → 国内资源有 v6 地址 → ③ 国内·有IPv6（总原则：能 v6 直连的一律 v6 直连）
+  → BEFORE_CN 业务分组 → CN_V4 国内站点分组（只剩纯 v4 部分）→ 其余国内域名 → ④
+  → AFTER_CN 业务分组 → 国内 v4 IP → ④ → ② 国外出口（兜底）
 """
 
 ENTRY, ABROAD, CN6, CN4 = "① 免流隧道", "② 国外出口", "③ 国内·有IPv6", "④ 国内·仅IPv4"
@@ -63,6 +65,10 @@ SERVICE_GROUPS = [
     ("💬 微信", "按进程匹配微信全部流量（含表情包、小程序）。默认「本机直连·IPv6优先」：有 v6 免费，没有则 v4 计费；"
               "不走隧道，避免表情包等资源因海外 IP 加载失败。",
      {"process": [r"/微信\.app/", r"/WeChat\.app/"]}, D_V6PREF, "before_cn"),
+    ("📱 B站·抖音·小红书", "哔哩哔哩、抖音、小红书（网页与 App，含视频/图片 CDN）。有 IPv6 的资源固定走「③ 国内·有IPv6」"
+                       "（直连免费），这里只管它们只有 IPv4 的部分（主站、大部分视频）。默认「④ 国内·仅IPv4」= 免流隧道，"
+                       "会绕德国再回国：慢一些，且可能被分到海外 CDN；想要速度就切「本机直连·仅IPv4」（校园网 v4 计费）。",
+     {"rule_sets": ["geosite/bilibili", "geosite/douyin", "geosite/xiaohongshu"]}, CN4, "cn_v4"),
     ("🤖 AI", "ChatGPT、Claude、Gemini、Perplexity 等海外 AI 服务。默认「[v4直连] 美国家宽 Sixtynet · 经搬瓦工中转」"
              "（家宽 IP，延迟低，计费）；想省流量可切到 [免流] 版本。",
      {"rule_sets": ["geosite/category-ai-!cn", "geosite/openai", "geosite/anthropic", "geosite/google-gemini"]},
