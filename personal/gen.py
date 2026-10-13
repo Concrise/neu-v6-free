@@ -38,6 +38,11 @@ DEFAULTS = {
         "203.0.113.20": {"v6": "2001:db8::2", "label": "Netcup 德国"},
     },
     "default_landing": "🇺🇸 家宽Sixtynet",
+    # 自有服务器（entry_servers）的 Hysteria2 用 Brutal（按带宽发包、丢包不降速），适合丢包多的校园网出国线路；
+    # 服务端 ignore_client_bandwidth=false 才生效。设为 null 则回到 BBR
+    "hy2_brutal": {"up_mbps": 30, "down_mbps": 100},
+    # ① 免流隧道 默认用哪种协议的入口（null = 自动选择）
+    "entry_default": "hysteria2",
     "cn_dns_v6": "2400:3200::1",  # 国内 CDN 只对 v6 来源的查询返回 AAAA
     "cn_dns_v4": "223.5.5.5",
     "direct_domains": ["neu.edu.cn"],
@@ -170,6 +175,8 @@ def build(settings, sub):
             print(f"跳过不支持的节点: {p['name']} ({p['type']})", file=sys.stderr)
             continue
         srv = servers.get(p["server"])
+        if srv and p["type"] == "hysteria2" and s["hy2_brutal"]:
+            o.update(s["hy2_brutal"])  # 自有服务器的 Hy2（v6 入口、[免流]、[v4直连] 三个版本）都用 Brutal
         if srv and p["type"] in ENTRY_PROTOCOLS and (p["type"] != "vless" or "reality-opts" in p):
             e = json.loads(json.dumps(o))  # 派生 v6 入口：同端口同凭据，只换地址
             e.update(server=srv["v6"], tag=f"{srv['label']} v6 · {ENTRY_PROTOCOLS[p['type']]}")
@@ -210,7 +217,8 @@ def build(settings, sub):
     hk_ports = [(h.pop("port"), h) for h in hks]
     service_members = [ABROAD, ORACLE_EXIT, CN6, CN4, D_V6PREF, D_V4, *landings, *v4_landings]
     outbounds = [
-        selector(ENTRY, [AUTO, *entry_tags, D_ANY], AUTO),
+        selector(ENTRY, [AUTO, *entry_tags, D_ANY],
+                 next((e["tag"] for e in entry_nodes if e["type"] == s["entry_default"]), AUTO)),
         {"type": "urltest", "tag": AUTO, "outbounds": entry_tags, "url": DELAY_URL,
          "interval": "3m", "tolerance": 50, "idle_timeout": "30m"},
         selector(ABROAD, landings + v4_landings, tag[s["default_landing"]]),
