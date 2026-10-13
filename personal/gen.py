@@ -5,7 +5,7 @@
   ① 国内域名解析出 v6（经 v6 DNS 查询）→ ③ 国内·有IPv6（默认本机 v6 直连）
   ② 其余国内                          → ④ 国内·仅IPv4（默认 隧道直出，即经 ① 免流隧道从入口服务器出 v4）
   ③ 国外                              → ② 国外出口（默认 [免流] 美国家宽 Sixtynet）
-业务分组与优先级见 groups.py。另有独立入口 hk（10809）固定走 HK家宽。
+业务分组与优先级见 groups.py。另有独立入口 hk-<端口>（10809 起）各自固定走一条 HK家宽（指纹浏览器用）。
 
 用法：python3 gen.py [-o out/sing-box.json] [--no-tun] [--rules-dir DIR] [--panel-dir DIR]
 """
@@ -29,7 +29,9 @@ INSTALL_ETC = "/usr/local/etc/neu-v6-router"
 DEFAULTS = {
     "listen": "127.0.0.1",
     "main_port": 10808,
-    "hk_port": 10809,
+    # 指纹浏览器「真·直连」入口：全部流量本机 IPv4 直连（计费），不进任何分流/隧道；设为 null 关闭
+    "direct_port": 10812,
+    "hk_port": 10809,  # 旧版单个 hk_outbound 的端口；hk_outbounds 每项自带 port
     "clash_api": "127.0.0.1:9090",
     # 免流隧道入口：订阅里这些服务器的 v4 节点会各派生一个 v6 入口（同端口同凭据，服务端需监听 ::）
     "entry_servers": {
@@ -203,7 +205,9 @@ def build(settings, sub):
     v4_landings = [n["tag"] for n in v4_nodes]
     own_servers = [f"{ip}/32" for ip in servers] + [f"{v['v6']}/128" for v in servers.values()]
 
-    hk = dict(s["hk_outbound"])
+    # 指纹浏览器入口：每条 HK 家宽一个本地端口，互相隔离
+    hks = [dict(h) for h in s.get("hk_outbounds") or [dict(s["hk_outbound"], port=s["hk_port"])]]
+    hk_ports = [(h.pop("port"), h) for h in hks]
     service_members = [ABROAD, ORACLE_EXIT, CN6, CN4, D_V6PREF, D_V4, *landings, *v4_landings]
     outbounds = [
         selector(ENTRY, [AUTO, *entry_tags, D_ANY], AUTO),
@@ -217,7 +221,7 @@ def build(settings, sub):
         *entry_nodes,
         *nodes,
         *v4_nodes,
-        hk,
+        *(h for _, h in hk_ports),
         {"type": "direct", "tag": D_ANY},
         # direct 收到的仍是域名，会用 default_domain_resolver（v4 DNS）重解析；
         # 所以按 IP 版本区分的直连都要自带 domain_resolver
@@ -236,7 +240,9 @@ def build(settings, sub):
 
     inbounds = [
         {"type": "mixed", "tag": "main", "listen": s["listen"], "listen_port": s["main_port"]},
-        {"type": "mixed", "tag": "hk", "listen": s["listen"], "listen_port": s["hk_port"]},
+        *({"type": "mixed", "tag": f"hk-{port}", "listen": s["listen"], "listen_port": port} for port, _ in hk_ports),
+        *([{"type": "mixed", "tag": "direct-port", "listen": s["listen"], "listen_port": s["direct_port"]}]
+          if s["direct_port"] else []),
     ]
     if s["tun"]:
         # v4/v6 都接管：否则国外站的 v6 会绕过代理从校园网直出
@@ -266,7 +272,9 @@ def build(settings, sub):
         "route": {
             "rule_set": rule_sets,
             "rules": [
-                {"inbound": ["hk"], "outbound": hk["tag"]},
+                *({"inbound": [f"hk-{port}"], "outbound": h["tag"]} for port, h in hk_ports),
+                # 只走 v4：出口 IP 固定为校园网 v4，不会时而 v4 时而 v6
+                {"inbound": ["direct-port"], "outbound": D_V4},
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
                 {"ip_is_private": True, "outbound": D_ANY},
@@ -317,7 +325,7 @@ def node_notes(cfg, entries):
     notes = {}
     for o in cfg["outbounds"]:
         t = o["tag"]
-        if o["type"] in ("selector", "direct", "urltest") or t in OPTION_NOTES or t == "HK家宽":
+        if o["type"] in ("selector", "direct", "urltest") or t in OPTION_NOTES or t.startswith("HK家宽"):
             continue
         if t in entries:
             notes[t] = "通过校园网 IPv6 连到这台服务器（隧道入口，免费）"
@@ -330,13 +338,33 @@ def node_notes(cfg, entries):
     return notes
 
 
+def hk_info(cfg):
+    """HK家宽固定入口说明页，按实际生成的端口列出。"""
+    route = {r["inbound"][0]: r["outbound"] for r in cfg["route"]["rules"] if "inbound" in r}
+    ports = [(i["listen_port"], route[i["tag"]]) for i in cfg["inbounds"] if i["tag"].startswith("hk-")]
+    if not ports:
+        return []
+    lines = "；".join(f"127.0.0.1:{p} → {t}" for p, t in ports)
+    span = str(ports[0][0]) if len(ports) == 1 else f"{ports[0][0]}-{ports[-1][0]}"
+    return [{"name": f"🏠 HK家宽({span})",
+             "desc": f"专供指纹浏览器，每个端口固定一条 HK 家宽、本机 v4 直连（计费）：{lines}。"
+                     "与其他分组完全隔离，切换任何分组都不影响它们。"}]
+
+
+def direct_info(cfg):
+    port = next((i["listen_port"] for i in cfg["inbounds"] if i["tag"] == "direct-port"), None)
+    return [{"name": f"🔌 本机直连({port})",
+             "desc": f"127.0.0.1:{port} 专供指纹浏览器：全部流量本机 IPv4 直连（校园网真实 IP，计费），"
+                     "不经隧道、不按站点分流，切换任何分组都不影响它。"}] if port else []
+
+
 def panel_meta(cfg, entries):
     """面板用的分组顺序与说明。"""
     return {
         "node_notes": node_notes(cfg, entries),
         "groups": [{"name": n, "desc": d, "kind": "base"} for n, d in BASE_GROUPS]
         + [{"name": n, "desc": d, "kind": "service", "default": dft} for n, d, _, dft, _ in SERVICE_GROUPS],
-        "info": [{"name": n, "desc": d} for n, d in INFO_PAGES],
+        "info": [{"name": n, "desc": d} for n, d in INFO_PAGES] + hk_info(cfg) + direct_info(cfg),
         "notes": OPTION_NOTES,
         "free_prefix": FREE,
         "v4_prefix": V4,
