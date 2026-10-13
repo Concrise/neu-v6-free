@@ -20,7 +20,7 @@ import urllib.parse
 
 import yaml
 
-from groups import (ABROAD, BASE_GROUPS, CN4, CN6, D_ANY, D_V4, D_V6, D_V6PREF, DISPLAY_NAMES, ENTRY, FREE,
+from groups import (ABROAD, AUTO, BASE_GROUPS, CN4, CN6, D_ANY, D_V4, D_V6, D_V6PREF, DISPLAY_NAMES, ENTRY, FREE,
                     INFO_PAGES, OPTION_NOTES, ORACLE_EXIT, SERVICE_GROUPS, V4)
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -31,20 +31,25 @@ DEFAULTS = {
     "main_port": 10808,
     "hk_port": 10809,
     "clash_api": "127.0.0.1:9090",
-    "entries": ["🇺🇸[hy2]Oracle-SJ-ARM-v6", "🇺🇸[vless]Oracle-SJ-ARM-v6"],
+    # 免流隧道入口：订阅里这些服务器的 v4 节点会各派生一个 v6 入口（同端口同凭据，服务端需监听 ::）
+    "entry_servers": {
+        "203.0.113.20": {"v6": "2001:db8::2", "label": "Netcup 德国"},
+    },
     "default_landing": "🇺🇸 家宽Sixtynet",
     "cn_dns_v6": "2400:3200::1",  # 国内 CDN 只对 v6 来源的查询返回 AAAA
     "cn_dns_v4": "223.5.5.5",
     "direct_domains": ["neu.edu.cn"],
-    # 不作为落地的节点：Oracle 的 v4 节点与「免流入口」（Oracle 出口，免费）重复且计费
-    "exclude_nodes_regex": r"Oracle-SJ-ARM$",
+    # 不作为落地的节点：Oracle 的 v4 节点与「隧道直出」重复且计费；订阅里现成的 -v6 节点由 entry_servers 取代
+    "exclude_nodes_regex": r"Oracle-SJ-ARM(-v6)?$",
     "tun": True,
     "rules_dir": f"{INSTALL_ETC}/rules",  # 安装后的位置（install/update 会拷过去）
     "panel_dir": f"{INSTALL_ETC}/panel",
     "rule_set_base": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo",
 }
 SKIP_TYPES = {"direct", "reject", "dns"}
-SUB_GROUP_ALIAS = {"🆓 免流入口": ENTRY}  # 订阅里 dialer-proxy 的组名 → 本配置的组名
+SUB_GROUP_ALIAS = {"🆓 免流入口": ENTRY}
+ENTRY_PROTOCOLS = {"hysteria2": "Hysteria2", "tuic": "TUIC", "vless": "Reality", "anytls": "AnyTLS"}  # 顺序即排序
+DELAY_URL = "https://www.gstatic.com/generate_204"  # 订阅里 dialer-proxy 的组名 → 本配置的组名
 
 
 def tls_block(p, *, sni_key="servername", reality=False):
@@ -151,53 +156,65 @@ def service_rule(match, outbound):
 
 def build(settings, sub):
     s = {**DEFAULTS, **settings}
-    entries = s["entries"]
+    servers = s["entry_servers"]
 
     raw = {}  # 订阅名 → sing-box outbound（tag 暂为订阅名）
+    entry_nodes = []  # (服务器序, 协议序, outbound)
     for p in sub["proxies"]:
-        if p["type"] in SKIP_TYPES or re.search(s["exclude_nodes_regex"], p["name"]):
+        if p["type"] in SKIP_TYPES:
             continue
         o = convert(p)
         if o is None:
             print(f"跳过不支持的节点: {p['name']} ({p['type']})", file=sys.stderr)
             continue
+        srv = servers.get(p["server"])
+        if srv and p["type"] in ENTRY_PROTOCOLS and (p["type"] != "vless" or "reality-opts" in p):
+            e = json.loads(json.dumps(o))  # 派生 v6 入口：同端口同凭据，只换地址
+            e.update(server=srv["v6"], tag=f"{srv['label']} v6 · {ENTRY_PROTOCOLS[p['type']]}")
+            entry_nodes.append((list(servers).index(p["server"]), list(ENTRY_PROTOCOLS).index(p["type"]), e))
+        if re.search(s["exclude_nodes_regex"], p["name"]):
+            continue
         if p.get("dialer-proxy"):
             o["detour"] = SUB_GROUP_ALIAS.get(p["dialer-proxy"], p["dialer-proxy"])
         raw[p["name"]] = o
-    missing = [e for e in entries + [s["default_landing"]] if e not in raw]
-    if missing:
-        sys.exit(f"订阅里缺少节点: {missing}")
+    entry_nodes = [e for *_, e in sorted(entry_nodes, key=lambda x: x[:2])]
+    entry_tags = [e["tag"] for e in entry_nodes]
+    if not entry_tags or s["default_landing"] not in raw:
+        sys.exit(f"订阅里缺少入口节点或默认落地: entries={entry_tags} landing={s['default_landing']}")
 
     def via_entry(name, seen=()):
         d = raw[name].get("detour")
         return d == ENTRY or (d in raw and d not in seen and via_entry(d, seen + (name,)))
 
-    # 统一命名：入口用显示名；第一跳走 ① 的加 [免流]，其余（本机直连）加 [v4直连]
+    # 统一命名：第一跳走 ① 的加 [免流]，其余（本机直连）加 [v4直连]
     disp = lambda n: DISPLAY_NAMES.get(n, n)  # noqa: E731
-    tag = {n: disp(n) if n in entries else (FREE if via_entry(n) else V4) + disp(n) for n in raw}
+    tag = {n: (FREE if via_entry(n) else V4) + disp(n) for n in raw}
     nodes = []
     for n, o in raw.items():
         o["tag"] = tag[n]
         if o.get("detour") in tag:
             o["detour"] = tag[o["detour"]]
         nodes.append(o)
-    landings = [tag[n] for n in raw if n not in entries]
+    landings = [tag[n] for n in raw]
     # 第一跳直接是 ① 的落地，再各生成一个本机 v4 直连的副本
     v4_nodes = [dict(raw[n], tag=V4 + disp(n)) for n in raw if raw[n].get("detour") == ENTRY]
     for n in v4_nodes:
         n.pop("detour")
     v4_landings = [n["tag"] for n in v4_nodes]
-    entry_tags = [tag[e] for e in entries]
+    own_servers = [f"{ip}/32" for ip in servers] + [f"{v['v6']}/128" for v in servers.values()]
 
     hk = dict(s["hk_outbound"])
     service_members = [ABROAD, ORACLE_EXIT, CN6, CN4, D_V6PREF, D_V4, *landings, *v4_landings]
     outbounds = [
-        selector(ENTRY, entry_tags + [D_ANY], entry_tags[0]),
+        selector(ENTRY, [AUTO, *entry_tags, D_ANY], AUTO),
+        {"type": "urltest", "tag": AUTO, "outbounds": entry_tags, "url": DELAY_URL,
+         "interval": "3m", "tolerance": 50, "idle_timeout": "30m"},
         selector(ABROAD, landings + v4_landings, tag[s["default_landing"]]),
         selector(CN6, [D_V6, D_V6PREF, ORACLE_EXIT], D_V6),
         selector(CN4, [ORACLE_EXIT, D_V4, D_V6PREF], ORACLE_EXIT),
         selector(ORACLE_EXIT, [ENTRY], ENTRY),
         *[selector(name, service_members, default) for name, _, _, default, _ in SERVICE_GROUPS],
+        *entry_nodes,
         *nodes,
         *v4_nodes,
         hk,
@@ -250,6 +267,8 @@ def build(settings, sub):
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
                 {"ip_is_private": True, "outbound": D_ANY},
+                # 自己的服务器（SSH、面板等）本机直连，不绕去落地
+                {"ip_cidr": own_servers, "outbound": D_ANY},
                 {"domain_suffix": s["direct_domains"], "outbound": D_ANY},
                 *services("before_cn"),
                 # ① / ②：国内域名先经 v6 DNS 解析，有 v6 地址才直连
@@ -291,10 +310,10 @@ def node_notes(cfg, entries):
     notes = {}
     for o in cfg["outbounds"]:
         t = o["tag"]
-        if o["type"] in ("selector", "direct") or t in OPTION_NOTES or t == "HK家宽":
+        if o["type"] in ("selector", "direct", "urltest") or t in OPTION_NOTES or t == "HK家宽":
             continue
         if t in entries:
-            notes[t] = "通过校园网 IPv6 连到 Oracle（隧道入口，免费）"
+            notes[t] = "通过校园网 IPv6 连到这台服务器（隧道入口，免费）"
         elif via_entry(t):
             hop = o["detour"]
             notes[t] = "先走 ① 免流隧道，再到此落地（免费）" if hop == ENTRY else \
@@ -345,8 +364,7 @@ def main():
     panel = ROOT / "out" / "panel"
     panel.mkdir(parents=True, exist_ok=True)
     shutil.copy(ROOT / "panel" / "index.html", panel / "index.html")
-    entries = settings.get("entries", DEFAULTS["entries"])
-    entries = [DISPLAY_NAMES.get(e, e) for e in entries]
+    entries = [t for t in next(o for o in cfg["outbounds"] if o["tag"] == ENTRY)["outbounds"] if t not in (AUTO, D_ANY)]
     (panel / "groups.json").write_text(json.dumps(panel_meta(cfg, entries), ensure_ascii=False, indent=1),
                                        encoding="utf-8")
     sel = {o["tag"]: o["default"] for o in cfg["outbounds"] if o["type"] == "selector"}

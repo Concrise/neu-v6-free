@@ -6,9 +6,10 @@
 """
 
 ENTRY, ABROAD, CN6, CN4 = "① 免流隧道", "② 国外出口", "③ 国内·有IPv6", "④ 国内·仅IPv4"
-ORACLE_EXIT = "Oracle 美国出口"  # 只含 ① 的分组：作为「出口」时语义是「从 Oracle 出去」
+ORACLE_EXIT = "隧道直出"  # 只含 ① 的分组：作为「出口」时语义是「从隧道入口那台服务器直接出去」
 D_V6PREF, D_V4, D_V6 = "本机直连·IPv6优先", "本机直连·仅IPv4", "本机直连·仅IPv6"
 D_ANY = "不走隧道（本机直连）"
+AUTO = "自动选择（最快可用）"  # ① 里的 urltest：定时测速，自动避开挂掉的入口
 FREE, V4 = "[免流] ", "[v4直连] "  # 节点前缀：第一跳走 ① 免流隧道（免费） / 本机 v4 直接连（计费）
 
 # 订阅节点名 → 面板显示名（不含前缀）。中转链写成「落地 · 经X中转」，避免和链路箭头混淆
@@ -26,32 +27,32 @@ DISPLAY_NAMES = {
     "Netcup-CF-家庭WiFi-联通-SJC": "Netcup CF优选 · 联通SJC",
     "Netcup-CF-手机流量-移动-FRA": "Netcup CF优选 · 移动FRA",
     "Netcup-CF-家庭WiFi-联通-LAX-1": "Netcup CF优选 · 联通LAX",
-    "🇺🇸[hy2]Oracle-SJ-ARM-v6": "Oracle 圣何塞 v6 · Hysteria2",
-    "🇺🇸[vless]Oracle-SJ-ARM-v6": "Oracle 圣何塞 v6 · Reality",
 }
 
 # 出口选项的说明（面板里显示在选项下方）
 OPTION_NOTES = {
-    ORACLE_EXIT: "走 ① 免流隧道到 Oracle，从 Oracle 出去（美国机房 IP，免费）",
+    ORACLE_EXIT: "走 ① 免流隧道，直接从入口那台服务器出去（目前是 Netcup 德国机房 IP，免费）",
     ABROAD: "跟随「② 国外出口」的选择",
     CN6: "跟随「③ 国内·有IPv6」",
     CN4: "跟随「④ 国内·仅IPv4」",
     D_V6PREF: "有 IPv6 走 v6（免费），否则 v4（计费）",
     D_V4: "只用 IPv4（计费），对方看到校园网 IP",
     D_V6: "只用 IPv6（免费），目标没有 v6 就连不上",
-    D_ANY: "不走 Oracle 隧道。离开校园网（没有 v6）时选这个",
+    D_ANY: "不走隧道。离开校园网（没有 v6）时选这个",
+    AUTO: "每 3 分钟测一次所有入口，自动用最快且可用的；某台服务器挂了会自动换",
 }
 
 # 基础分组：(名称, 说明)
 BASE_GROUPS = [
-    (ENTRY, "决定流量怎么离开校园网（第一跳）。所有带 [免流] 的节点和「Oracle 美国出口」都先走这里。"
-            "在校园网选 Oracle v6（Hysteria2 更快，Reality 走 TCP 更稳）；离开校园网时选「不走隧道」，"
-            "[免流] 节点会自动变成普通直连代理。"),
+    (ENTRY, "决定流量怎么离开校园网（第一跳）。所有带 [免流] 的节点和「隧道直出」都先走这里。"
+            "默认「自动选择」：定时测速，自动用最快且可用的入口，某台服务器挂了会自动换。"
+            "也可手动指定某个入口协议（Hysteria2/TUIC 走 UDP 通常更快，Reality/AnyTLS 走 TCP 更稳）。"
+            "离开校园网时选「不走隧道」，[免流] 节点会自动变成普通直连代理。"),
     (ABROAD, "国外网站最终从哪里出去（落地），也是所有没被规则匹配到的流量的兜底。"
              "[免流] = 先走 ① 隧道再到该落地（免费）；[v4直连] = 本机直接用 IPv4 连该落地（延迟低、计费）。"
              "大多数业务分组默认「跟随② 国外出口」，改这里它们一起变。"),
     (CN6, "国内网站、且查得到 IPv6 地址时走这里。默认「本机直连·仅IPv6」，校园网 v6 免费。"),
-    (CN4, "国内网站、但只有 IPv4 时走这里。默认「Oracle 美国出口」（免费，但对方看到美国 IP、延迟较高）；"
+    (CN4, "国内网站、但只有 IPv4 时走这里。默认「隧道直出」（免费，但对方看到海外机房 IP、延迟较高）；"
           "遇到不认海外 IP 的网站，可临时切到「本机直连·仅IPv4」（计费）。"),
 ]
 
@@ -84,15 +85,15 @@ SERVICE_GROUPS = [
      {"rule_sets": ["geosite/google"]}, ABROAD, "before_cn"),
     ("Ⓜ️ 微软", "Microsoft、OneDrive、Bing、Office、Windows 更新（含国内 CDN）。",
      {"rule_sets": ["geosite/microsoft", "geosite/onedrive"]}, ABROAD, "before_cn"),
-    ("🍎 苹果", "Apple 全部服务（App Store、iCloud、系统更新，含国内 CDN）。默认「Oracle 美国出口」（免费）。",
+    ("🍎 苹果", "Apple 全部服务（App Store、iCloud、系统更新，含国内 CDN）。默认「隧道直出」（免费）。",
      {"rule_sets": ["geosite/apple"]}, ORACLE_EXIT, "before_cn"),
-    ("🎮 Steam", "Steam 商店与下载。下载流量大，默认「Oracle 美国出口」，不占家宽带宽。",
+    ("🎮 Steam", "Steam 商店与下载。下载流量大，默认「隧道直出」，不占家宽带宽。",
      {"rule_sets": ["geosite/steam"]}, ORACLE_EXIT, "before_cn"),
     ("🅾️ Oracle", "甲骨文云控制台等。默认跟随「② 国外出口」，保持固定落地 IP 便于账号风控。",
      {"rule_sets": ["geosite/oracle"]}, ABROAD, "before_cn"),
     ("🚀 测速", "Speedtest、fast.com 等测速网站，想测哪条线路就切到哪条。",
      {"rule_sets": ["geosite/category-speedtest"]}, ABROAD, "before_cn"),
-    ("🎯 海外游戏", "海外游戏平台与游戏（国内游戏已在前面按国内规则处理）。默认「Oracle 美国出口」。",
+    ("🎯 海外游戏", "海外游戏平台与游戏（国内游戏已在前面按国内规则处理）。默认「隧道直出」。",
      {"rule_sets": ["geosite/category-games"]}, ORACLE_EXIT, "after_cn"),
 ]
 

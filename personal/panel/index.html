@@ -98,7 +98,9 @@ async function load() {
 function optNote(name) {
   if (meta.notes[name]) return meta.notes[name];
   if (meta.node_notes[name]) return meta.node_notes[name];
-  return proxies[name]?.type === "Selector" ? "跟随该分组的选择" : "";
+  const t = proxies[name]?.type;
+  if (t === "URLTest") return "自动选择，当前：" + (proxies[name].now || "测速中");
+  return t === "Selector" ? "跟随该分组的选择" : "";
 }
 
 function delayHtml(name) {
@@ -150,14 +152,14 @@ function renderGroup(name) {
   const kinds = { follow: [], direct: [], free: [], v4: [] };
   for (const n of p.all) {
     const t = proxies[n]?.type;
-    if (t === "Selector") kinds.follow.push(n);
+    if (t === "Selector" || t === "URLTest") kinds.follow.push(n);
     else if (t === "Direct") kinds.direct.push(n);
     else if (n.startsWith(meta.v4_prefix)) kinds.v4.push(n);
     else kinds.free.push(n);
   }
   const titles = { follow: "跟随其他分组 / 出口", direct: "本机直连（不走隧道）", free: "节点",
     v4: "[v4直连] 节点：本机直接用 IPv4 连过去（延迟低、计费）" };
-  if (name === "① 免流隧道") titles.free = "隧道入口（通过校园网 IPv6 连到 Oracle）";
+  if (name === "① 免流隧道") { titles.free = "隧道入口（通过校园网 IPv6 连到服务器）"; titles.follow = "自动"; }
   else titles.free = "[免流] 节点：先走 ① 免流隧道，再到该落地（免费）";
   for (const k of ["follow", "direct", "free", "v4"]) {
     if (!kinds[k].length) continue;
