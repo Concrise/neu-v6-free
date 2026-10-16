@@ -79,8 +79,9 @@ SERVICE_GROUPS = [
      V4 + "美国家宽 Sixtynet · 经搬瓦工中转", "before_cn"),
     ("📢 谷歌推送", "Google FCM 推送通道（安卓模拟器、部分 App 的消息推送）。",
      {"rule_sets": ["geosite/googlefcm"]}, ABROAD, "before_cn"),
-    ("📺 YouTube", "YouTube 视频与 App。流量大，默认跟随「② 国外出口」。",
-     {"rule_sets": ["geosite/youtube"]}, ABROAD, "before_cn"),
+    ("📺 YouTube", "YouTube 视频与 App。流量大，默认「[免流] Netcup 德国 · Hysteria2」：只经一跳隧道，建连比绕美国家宽快一倍，"
+                 "看视频不需要家宽 IP。",
+     {"rule_sets": ["geosite/youtube"]}, FREE + "Netcup 德国 · Hysteria2", "before_cn"),
     ("🎬 流媒体", "Netflix、Disney+、Spotify。需要解锁特定地区时在这里换落地。",
      {"rule_sets": ["geosite/netflix", "geosite/disney", "geosite/spotify"]}, ABROAD, "before_cn"),
     ("✈️ Telegram", "Telegram 的域名与 IP 段。",

@@ -39,3 +39,6 @@ TUN 同时接管 v4/v6；`auto_detect_interface` 让自身出站绑物理网卡�
 - 国内 CDN 只对 **v6 来源** 的 DNS 查询返回 AAAA，所以国内解析用 `2400:3200::1`。
 - sing-box 默认规则里 `rule_set` 与 `ip_cidr` 是「或」，「国内且有 v6」必须用 `logical and`。
 - `resolve` 动作后 direct 出站拿到的仍是域名，会用 `default_domain_resolver` 重解析；所以国内v6 用单独的 `direct-v6`（`domain_resolver: cn6, ipv6_only`）。
+- TUN 的 v6 地址不能用 ULA（`fd00::/8`）：RFC 6724 下「ULA 源 → 公网 v6」排在 v4 后，App 拿 v4 IP 进 TUN，`resolve` 对 IP 目标不生效，结果有 v6 的国内站也走了隧道。现用 `2001:db8:6e75::1`（仅本机内部）。
+- 腾讯等把 v6 放在单独域名（`down.qq.com` 无 AAAA，`downv6.qq.com` 有，同批节点）：`v6_aliases` 用 `override_address` 只改拨号目标，SNI 不变。
+- 有些国内 CDN 段有 AAAA 但校园网 v6 不通（如腾讯 `2402:4e00:1830:1214::/64`，微信图片/视频下载）。TUN 会先替 App 完成握手，App 的 Happy Eyeballs 失效、干等超时；`v6_broken_cidrs` 在 sniff 前 `reject`，App 立刻收到 RST 回退 v4。

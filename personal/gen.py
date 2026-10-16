@@ -46,6 +46,17 @@ DEFAULTS = {
     "cn_dns_v6": "2400:3200::1",  # 国内 CDN 只对 v6 来源的查询返回 AAAA
     "cn_dns_v4": "223.5.5.5",
     "direct_domains": ["neu.edu.cn"],
+    # 只有 v4 的国内域名 → 同一 CDN 上有 AAAA 的「v6 孪生域名」：连接目标改成孪生域名再走 ③ 国内·有IPv6。
+    # 腾讯把 v6 放在单独的域名上（同一批节点按 Host/SNI 服务原域名），自动判断查不到 v6
+    "v6_aliases": {
+        "down.qq.com": "downv6.qq.com",
+        "dldir1.qq.com": "downv6.qq.com",
+    },
+    # 有 AAAA 但从校园网 v6 实测不通的段：直接拒绝（TCP RST），让 App 立刻回退 v4。
+    # 不拒绝的话 TUN 会先替 App 完成握手，App 以为 v6 已连上，干等到超时（微信图片极慢/加载失败）
+    "v6_broken_cidrs": [
+        "2402:4e00:1830:1214::/64",  # 腾讯 *.tc.qq.com / wxsnsdy.wxs.qq.com：微信图片、视频、文件下载
+    ],
     # 不作为落地的节点：Oracle 的 v4 节点与「隧道直出」重复且计费；订阅里现成的 -v6 节点由 entry_servers 取代
     "exclude_nodes_regex": r"Oracle-SJ-ARM(-v6)?$",
     "tun": True,
@@ -253,8 +264,10 @@ def build(settings, sub):
           if s["direct_port"] else []),
     ]
     if s["tun"]:
-        # v4/v6 都接管：否则国外站的 v6 会绕过代理从校园网直出
-        inbounds.append({"type": "tun", "tag": "tun", "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+        # v4/v6 都接管：否则国外站的 v6 会绕过代理从校园网直出。
+        # v6 不能用 ULA（fd00::/8）：RFC 6724 下「ULA 源 → 公网 v6」排在 IPv4 后面，系统会给 App 先返回 v4，
+        # 连接进 TUN 时已是 v4 IP，上面的「国内有 v6 就直连」就判断不到。这里用文档段（只在本机 TUN 内部，不上网）
+        inbounds.append({"type": "tun", "tag": "tun", "address": ["172.19.0.1/30", "2001:db8:6e75::1/126"],
                          "auto_route": True, "strict_route": True, "stack": "mixed"})
 
     return {
@@ -283,14 +296,23 @@ def build(settings, sub):
                 *({"inbound": [f"hk-{port}"], "outbound": h["tag"]} for port, h in hk_ports),
                 # 只走 v4：出口 IP 固定为校园网 v4，不会时而 v4 时而 v6
                 {"inbound": ["direct-port"], "outbound": D_V4},
+                # 放在 sniff 前：TUN 能在握手前就拒绝，App 马上收到 RST 改用 v4
+                *([{"ip_cidr": s["v6_broken_cidrs"], "action": "reject"}] if s["v6_broken_cidrs"] else []),
                 {"action": "sniff"},
                 {"protocol": "dns", "action": "hijack-dns"},
                 {"ip_is_private": True, "outbound": D_ANY},
                 # 自己的服务器（SSH、面板等）本机直连，不绕去落地
                 {"ip_cidr": own_servers, "outbound": D_ANY},
                 {"domain_suffix": s["direct_domains"], "outbound": D_ANY},
-                # 按进程的分组（豆包、微信）最优先：整个 App 一起决定，不拆
+                # v6 孪生域名：只改拨号目标，TLS 的 SNI/证书仍是原域名
+                *({"domain": [src], "action": "route", "outbound": CN6, "override_address": dst}
+                  for src, dst in s["v6_aliases"].items()),
+                # 按进程的分组（豆包、微信、网易云）最优先：整个 App 一起决定，不拆
                 *[r for r in services("before_cn") if "process_path_regex" in r],
+                # 海外 QUIC（UDP 443）直接拒绝：浏览器会先试 QUIC，套在多层隧道里常卡好几秒才回退 TCP；
+                # 拒绝后立刻走 TCP。国内（含按进程直连的微信等）不受影响
+                {"type": "logical", "mode": "and", "action": "reject",
+                 "rules": [{"network": ["udp"], "port": [443]}, {"rule_set": [*cn_sets, "geoip-cn"], "invert": True}]},
                 # 总原则：国内资源只要有 v6 地址就 v6 直连（免费且最快），排在所有按站点分的分组前面
                 {"rule_set": cn_sets, "action": "resolve", "server": "cn6", "strategy": "prefer_ipv6"},
                 {"type": "logical", "mode": "and", "rules": [{"rule_set": cn_sets}, v6_any], "outbound": CN6},
