@@ -1,8 +1,8 @@
 # 自用设置（可入库，不含密钥）。密钥与订阅链接在 config.local.yaml。
 # 生成：node core/cli.js -c profile.yaml -c config.local.yaml -p mac  （./update.sh 会自动做）
 entry_servers:
-  "203.0.113.10": {v6: "2001:db8::1", label: "Azure 香港", hy2_brutal: {up_mbps: 30, down_mbps: 140}}
-  "203.0.113.20": {v6: "2001:db8::2", label: "Netcup 德国", landing: true}
+  "203.0.113.10": {v6: "2001:db8::1", label: "港机", hy2_brutal: {up_mbps: 30, down_mbps: 140}}
+  "203.0.113.20": {v6: "2001:db8::2", label: "Netcup", landing: true}
 default_landing: "🇺🇸 家宽Sixtynet"
 hy2_brutal: {up_mbps: 30, down_mbps: 100}
 entry_default: vless
@@ -10,33 +10,33 @@ exclude_nodes_regex: "Oracle-SJ-ARM(-v6)?$"
 entry_group_aliases: ["🆓 免流入口"]
 # 订阅（妙妙屋 自用东大版）已用 dialer-proxy 标好哪些节点走免流入口；CF优选节点有意不挂，所以不自动加
 landings_via_entry: false
-display_names:
-  "🇺🇸 家宽Sixtynet": "美国家宽 Sixtynet"
-  "🇺🇸 搬瓦工→Sixtynet家宽": "美国家宽 Sixtynet · 经搬瓦工中转"
-  "🇺🇸 DMIT→Sixtynet家宽": "美国家宽 Sixtynet · 经DMIT中转"
-  "🇺🇸 DMIT-圣何塞": "DMIT 圣何塞 · 机房IP"
-  "🇺🇸搬瓦工-洛杉矶": "搬瓦工 洛杉矶 · 机房IP"
-  "🇩🇪 Netcup-AnyTLS": "Netcup 德国 · AnyTLS"
-  "🇩🇪 Netcup-Reality": "Netcup 德国 · Reality"
-  "🇩🇪 Netcup-VMess-WS": "Netcup 德国 · VMess"
-  "🇩🇪 Netcup-Hysteria2": "Netcup 德国 · Hysteria2"
-  "🇩🇪 Netcup-TUIC": "Netcup 德国 · TUIC"
-  "Netcup-CF-家庭WiFi-联通-SJC": "Netcup CF优选 · 联通SJC"
-  "Netcup-CF-手机流量-移动-FRA": "Netcup CF优选 · 移动FRA"
-  "Netcup-CF-家庭WiFi-联通-LAX-1": "Netcup CF优选 · 联通LAX"
+display_names:   # 订阅节点名 → 面板显示名；面板会自动加「（经服务器）」或「（直连 v4）」
+  "🇺🇸 家宽Sixtynet": "美国家宽"
+  "🇺🇸 搬瓦工→Sixtynet家宽": "美国家宽 经搬瓦工"
+  "🇺🇸 DMIT→Sixtynet家宽": "美国家宽 经DMIT"
+  "🇺🇸 DMIT-圣何塞": "DMIT 圣何塞机房"
+  "🇺🇸搬瓦工-洛杉矶": "搬瓦工 洛杉矶机房"
+  "🇩🇪 Netcup-AnyTLS": "德国 Netcup AnyTLS"
+  "🇩🇪 Netcup-Reality": "德国 Netcup Reality"
+  "🇩🇪 Netcup-VMess-WS": "德国 Netcup VMess"
+  "🇩🇪 Netcup-Hysteria2": "德国 Netcup Hy2"
+  "🇩🇪 Netcup-TUIC": "德国 Netcup TUIC"
+  "Netcup-CF-家庭WiFi-联通-SJC": "Netcup CF优选 联通SJC"
+  "Netcup-CF-手机流量-移动-FRA": "Netcup CF优选 移动FRA"
+  "Netcup-CF-家庭WiFi-联通-LAX-1": "Netcup CF优选 联通LAX"
 group_defaults:
-  "🤖 AI": "[v4直连] 美国家宽 Sixtynet · 经搬瓦工中转"
+  "🤖 AI": "美国家宽 经搬瓦工（直连 v4）"
 rules_dir: /usr/local/etc/neu-v6-router/rules
 panel_dir: /usr/local/etc/neu-v6-router/panel
 cache_file: neu-v6-router.cache.db
 panel_pages:
   "🏠 HK家宽": "专供指纹浏览器，每个端口固定一条 HK 家宽、本机 v4 直连（计费）"
-  "🔌 本机直连": "专供指纹浏览器：全部流量本机 IPv4 直连（校园网真实 IP，计费），不经隧道、不按站点分流，切换任何分组都不影响它"
+  "🔌 本机直连": "专供指纹浏览器：全部流量本机 IPv4 直连（校园网真实 IP，计费），不经服务器、不按站点分流，切换任何分组都不影响它"
+
 
 # 面板说明里的个人信息（通用版是中性措辞）
 base_notes:
-  ① 免流隧道: 决定流量怎么离开校园网（第一跳）。所有带 [免流] 的节点和「隧道直出」都先走这里。默认「Azure 香港 v6 · Reality」：走 TCP，延迟约 50ms，实测可跑约 140Mbps。港机每月出站到 130GB 会自动停代理，这时请手动切到 Netcup 的入口或「自动选择」（在全部入口里挑最快可用的，挂了会自动换）。Hysteria2/TUIC 走 UDP，Reality/AnyTLS 走 TCP。离开校园网时选「不走隧道」，[免流] 节点会自动变成普通直连代理。
-  ④ 国内·仅IPv4: 国内网站、但只有 IPv4 时走这里。默认「隧道直出」（免费，对方看到香港机房 IP）；遇到不认海外 IP 的网站，可临时切到「本机直连·仅IPv4」（计费）。
+  免流服务器: "所有免费流量经哪台服务器出去。默认港机 Reality（延迟约 50ms，实测约 140Mbps）。港机每月出站到 130GB 会自动停，这时手动换成 Netcup 的入口或「自动选最快」。离开校园网时选「不用服务器」。"
 group_notes:
-  🤖 AI: ChatGPT、Claude、Gemini、Perplexity 等海外 AI 服务。默认「[v4直连] 美国家宽 Sixtynet · 经搬瓦工中转」（家宽 IP，延迟低，计费）；想省流量可切到 [免流] 版本。
-  📺 YouTube: YouTube 视频与 App。流量大，默认「隧道直出」：从免流入口（默认 Azure 香港）直接出去，只经一跳、延迟最低，看视频不需要家宽 IP。注意它会消耗港机每月 130GB 出站额度。
+  🤖 AI: "ChatGPT、Claude、Gemini 等。默认「美国家宽 经搬瓦工（直连 v4）」：家宽 IP、延迟低，计费；想省流量可选「（经服务器）」版本。"
+  📺 YouTube: "YouTube 视频与 App。默认从免流服务器直接出去（一跳、最快）。流量大，会消耗港机每月 130GB 出站额度。"

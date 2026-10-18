@@ -34,6 +34,6 @@ node core/cli.js -c profile.yaml -c config.local.yaml -p mac -o /tmp/x
 
 ## 和服务器的关系
 
-- **港机 `azure-hk`**：sing-box 四入站 （端口略）；每月出站 130GB 到上限自动停，此时「Reality · 自动（港机优先）」会自动退回 Netcup。
-- **妙妙屋「自用东大版」订阅**：`🆓 免流入口` 组对应这里的 ① 免流隧道（`entry_group_aliases`）。CF 优选节点有意不挂免流入口，所以设了 `landings_via_entry: false`。
+- **港机 `azure-hk`**：sing-box 四入站 （端口略）；每月出站 130GB 到上限自动停，此时要在面板把「免流服务器」手动换成 Netcup 的入口或「自动选最快」。
+- **妙妙屋「自用东大版」订阅**：`🆓 免流入口` 组对应这里的「免流服务器」（`entry_group_aliases`）。CF 优选节点有意不挂免流入口，所以设了 `landings_via_entry: false`。
 - 服务器侧的详细文档在 netcup 的 `~/docs/services/proxy-network.md`。
