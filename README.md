@@ -39,6 +39,24 @@ node cli.js -p all                   # 生成四个平台：out/<平台>/config.
 - 多个配置文件可以叠加：`node cli.js -c config.yaml -c secrets.local.yaml`，后面的覆盖前面的同名项。适合把可以公开的设置和含密码的设置分开放。
 - 本地订阅文件：`--sub-file sub.yaml`。
 
+### 模式二：部署服务器
+
+准备一台有公网 IPv4 + IPv6 的 Debian / Ubuntu VPS。登录后以 root 运行：
+
+```bash
+bash setup.sh
+```
+
+`setup.sh` 在仓库的 `server/` 目录里，可以先 scp 到服务器。它会做这些事：
+- 安装官方 sing-box，开 Reality / AnyTLS（TCP）和 Hysteria2 / TUIC（UDP）四个入站，都监听 IPv4 与 IPv6。
+- 端口默认随机，可以用 `PORTS="a b c d"` 指定。
+- 没开 BBR 的话顺便开上。
+- 最后输出一段设置，原样粘贴进客户端的 `config.yaml` 就是模式二。
+
+再次运行不会换密码，只会重新输出这段设置；`bash setup.sh --show` 只输出不改动。脚本**不改防火墙**，只告诉你要放行哪些端口：云平台的安全组要放行，本机如果开了防火墙也要放行，IPv4 和 IPv6 都要。
+
+服务器出站流量通常计费（比如 Azure 亚洲区每月前 100GB 免费），校园网下载的数据都会从服务器发出，留意额度。
+
 ### macOS
 
 ```bash
