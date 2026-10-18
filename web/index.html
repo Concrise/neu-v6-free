@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>东大 v6 免流配置生成器</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --card: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e2e2dc;
+    --accent: #2f6f4f; --accent-text: #ffffff; --warn: #9a5b00; --err: #b3261e; --code: #f0f0ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161715; --card: #1f201e; --text: #e8e8e3; --muted: #9b9b94; --line: #33342f;
+      --accent: #5fae86; --accent-text: #0e1a13; --warn: #e0a94a; --err: #ff8a80; --code: #2a2b28;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+  main { max-width: 820px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 24px; margin: 8px 0 4px; }
+  h2 { font-size: 17px; margin: 0 0 12px; }
+  p { margin: 6px 0; }
+  .lead, small, .hint { color: var(--muted); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-top: 16px; }
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .modes label { border: 1px solid var(--line); border-radius: 8px; padding: 12px; cursor: pointer; }
+  .modes label:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .modes b { display: block; }
+  textarea { width: 100%; min-height: 120px; font: 13px/1.45 ui-monospace, Menlo, Consolas, monospace; background: var(--code); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 10px; resize: vertical; }
+  .field { margin-top: 14px; }
+  .field > b { display: block; margin-bottom: 4px; }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: var(--muted); }
+  button { background: var(--accent); color: var(--accent-text); border: 0; border-radius: 6px; padding: 9px 16px; font: inherit; cursor: pointer; }
+  button:hover { filter: brightness(1.08); }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+  #error { color: var(--err); white-space: pre-wrap; }
+  #warnings { color: var(--warn); white-space: pre-wrap; font-size: 13px; }
+  #secret { font-size: 13px; word-break: break-all; }
+  .group { display: grid; grid-template-columns: 170px 1fr; gap: 4px 12px; padding: 10px 0; border-top: 1px solid var(--line); align-items: center; }
+  .group small { grid-column: 2; font-size: 12.5px; }
+  .gname { font-weight: 600; }
+  select { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; }
+  #downloads { display: flex; gap: 10px; flex-wrap: wrap; }
+  ol { padding-left: 20px; margin: 6px 0; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  @media (max-width: 560px) {
+    .modes { grid-template-columns: 1fr; }
+    .group { grid-template-columns: 1fr; }
+    .group small { grid-column: 1; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>东大 v6 免流配置生成器</h1>
+  <p class="lead">校园网 IPv6 不计费、IPv4 计费。这里生成的 sing-box 配置会尽量让流量走 v6。所有处理都在你的浏览器里完成，不会上传任何内容。</p>
+
+  <section>
+    <h2>1. 选模式、填信息</h2>
+    <div class="modes">
+      <label><input type="radio" name="mode" value="direct" checked> <b>模式一：v6 优先直连</b>
+        <small>不需要服务器。国内有 v6 的走 v6（免费），只有 v4 的走 v4（计费）。可以接自己的机场订阅。</small></label>
+      <label><input type="radio" name="mode" value="tunnel"> <b>模式二：自带双栈服务器</b>
+        <small>v6 连到服务器、服务器出 v4，只有 v4 的流量也免费。服务器先用 <code>server/setup.sh</code> 部署。</small></label>
+    </div>
+
+    <div class="field" id="server-box" hidden>
+      <b>服务器脚本输出</b>
+      <small>把 <code>setup.sh</code> 最后输出的那段（从 <code>entry_servers:</code> 到节点列表结束）原样粘贴进来。</small>
+      <textarea id="server" spellcheck="false" placeholder="entry_servers:&#10;  &quot;203.0.113.10&quot;: { v6: &quot;2001:db8::10&quot;, label: &quot;我的服务器&quot; }&#10;entry_default: vless&#10;nodes:&#10;  - { name: ..., type: vless, ... }"></textarea>
+    </div>
+
+    <div class="field">
+      <b>机场订阅内容（可选）</b>
+      <small>Clash / mihomo 格式（订阅转换时选 Clash）。浏览器不能直接拉订阅链接，请在浏览器里打开订阅链接，把全部内容复制进来。节点地址是域名且有 IPv6 时会用 v6 连接（免费）。</small>
+      <textarea id="sub" spellcheck="false" placeholder="proxies:&#10;  - { name: 节点A, type: hysteria2, server: example.com, port: 443, password: ... }"></textarea>
+    </div>
+
+    <details>
+      <summary>高级设置（可选）</summary>
+      <p class="hint">YAML 格式，覆盖前面的同名项。可用项见仓库里的 <code>config.example.yaml</code>，例如 <code>display_names</code>、<code>hy2_brutal</code>、<code>v6_broken_cidrs</code>。</p>
+      <textarea id="advanced" spellcheck="false" placeholder="hy2_brutal: { up_mbps: 30, down_mbps: 100 }"></textarea>
+    </details>
+
+    <div class="row">
+      <button id="parse">下一步：选分组</button>
+      <label class="hint"><input type="checkbox" id="remember"> 记住输入（只存在这个浏览器里，含密码，公用电脑别勾）</label>
+    </div>
+    <p id="error"></p>
+  </section>
+
+  <section id="step2" hidden>
+    <h2>2. 选每个分组默认走哪里</h2>
+    <p id="summary"></p>
+    <p id="warnings"></p>
+    <p class="hint">这里只是默认值，导入后在 App 或面板里随时可以改。</p>
+    <div id="groups"></div>
+  </section>
+
+  <section id="step3" hidden>
+    <h2>3. 下载配置</h2>
+    <div id="downloads"></div>
+    <p id="secret"></p>
+    <details open>
+      <summary>怎么导入</summary>
+      <ol>
+        <li><b>Android / iOS / macOS</b>：装 sing-box 官方 App，新建配置 → 本地 → 选下载的 json 文件。</li>
+        <li><b>Windows</b>：把 zip 解压到 <code>C:\</code>，得到 <code>C:\neu-v6-free</code>。在 v2rayN 里「添加自定义配置」，选其中的 <code>config.json</code>，内核选 sing-box，以管理员身份运行（TUN 需要）。分组面板：<code>http://127.0.0.1:9090/ui</code>。</li>
+        <li><b>macOS 想开机常驻、带网页面板</b>：用命令行版（<code>node cli.js -p mac</code> + <code>mac/install.sh</code>）。</li>
+      </ol>
+      <p class="hint">生成的文件里有节点密码，不要发到群里。离开校园网（没有 IPv6）时，模式二在「① 免流隧道」选「不走隧道」。</p>
+    </details>
+  </section>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
