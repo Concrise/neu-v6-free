@@ -9,9 +9,10 @@ OUT=${OUT:-out}
 ETC_DIR=/usr/local/etc/$NAME
 node "$ROOT/cli.js" "$@" -p mac -o "$OUT"
 SRC="$OUT/mac"
-sudo "/usr/local/libexec/$NAME/sing-box" check -c "$SRC/config.json"
+# 先装规则集再检查：配置引用的是安装目录里的规则集，新增的规则集不先装进去，检查会报找不到文件
 sudo install -o root -g wheel -m 644 "$SRC"/rules/*.srs "$ETC_DIR/rules/"
 sudo install -o root -g wheel -m 644 "$SRC"/panel/* "$ETC_DIR/panel/"
+sudo "/usr/local/libexec/$NAME/sing-box" check -c "$SRC/config.json"
 sudo install -o root -g wheel -m 600 "$SRC/config.json" "$ETC_DIR/config.json"
 sudo launchctl kickstart -k "system/$LABEL"
 echo "已更新并重启服务"
