@@ -20,7 +20,7 @@ import urllib.parse
 
 import yaml
 
-from groups import (ABROAD, AUTO, BASE_GROUPS, CN4, CN6, D_ANY, D_V4, D_V6, D_V6PREF, DISPLAY_NAMES, ENTRY, FREE,
+from groups import (ABROAD, AUTO, PROTO_AUTO, BASE_GROUPS, CN4, CN6, D_ANY, D_V4, D_V6, D_V6PREF, DISPLAY_NAMES, ENTRY, FREE,
                     INFO_PAGES, OPTION_NOTES, ORACLE_EXIT, SERVICE_GROUPS, V4)
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -34,15 +34,22 @@ DEFAULTS = {
     "hk_port": 10809,  # 旧版单个 hk_outbound 的端口；hk_outbounds 每项自带 port
     "clash_api": "127.0.0.1:9090",
     # 免流隧道入口：订阅里这些服务器的 v4 节点会各派生一个 v6 入口（同端口同凭据，服务端需监听 ::）
+    # 顺序即面板排序。Azure 香港（2026-10-18）：校园网 v6 建连约 50ms（德国约 240ms）；每月出站 130GB 上限，
+    # 超限时服务端停代理，靠「自动选择」退回 Netcup
     "entry_servers": {
+        # 港机实测（speedtest-hk.sh）瓶颈约 150Mbps、TCP 单线程 141，全局的下行 100 会拖慢它，单独设 140
+        "203.0.113.10": {"v6": "2001:db8::1", "label": "Azure 香港",
+                           "hy2_brutal": {"up_mbps": 30, "down_mbps": 140}},
         "203.0.113.20": {"v6": "2001:db8::2", "label": "Netcup 德国"},
     },
     "default_landing": "🇺🇸 家宽Sixtynet",
     # 自有服务器（entry_servers）的 Hysteria2 用 Brutal（按带宽发包、丢包不降速），适合丢包多的校园网出国线路；
-    # 服务端 ignore_client_bandwidth=false 才生效。设为 null 则回到 BBR
+    # 服务端 ignore_client_bandwidth=false 才生效。设为 null 则回到 BBR；entry_servers 里可按服务器单独覆盖
     "hy2_brutal": {"up_mbps": 30, "down_mbps": 100},
-    # ① 免流隧道 默认用哪种协议的入口（null = 自动选择）
-    "entry_default": "hysteria2",
+    # ① 免流隧道 默认用哪种协议的入口（null = 自动选择全部入口）。指定协议时会生成「该协议·自动」组：
+    # 只在各服务器的该协议入口间测速，平时选港机，港机流量超限停机时自动退回 Netcup。
+    # 2026-10-18 实测港机 TCP 单线程 141Mbps、已接近线路上限，默认用 Reality（TCP）
+    "entry_default": "vless",
     "cn_dns_v6": "2400:3200::1",  # 国内 CDN 只对 v6 来源的查询返回 AAAA
     "cn_dns_v4": "223.5.5.5",
     "direct_domains": ["neu.edu.cn"],
@@ -57,8 +64,9 @@ DEFAULTS = {
     "v6_broken_cidrs": [
         "2402:4e00:1830:1214::/64",  # 腾讯 *.tc.qq.com / wxsnsdy.wxs.qq.com：微信图片、视频、文件下载
     ],
-    # 不作为落地的节点：Oracle 的 v4 节点与「隧道直出」重复且计费；订阅里现成的 -v6 节点由 entry_servers 取代
-    "exclude_nodes_regex": r"Oracle-SJ-ARM(-v6)?$",
+    # 不作为落地的节点：Oracle 的 v4 节点与「隧道直出」重复且计费；订阅里现成的 -v6 节点由 entry_servers 取代；
+    # Azure 香港只当入口（作落地会经港机再绕回港机，出站流量翻倍）
+    "exclude_nodes_regex": r"Oracle-SJ-ARM(-v6)?$|AzureHK-",
     "tun": True,
     "rules_dir": f"{INSTALL_ETC}/rules",  # 安装后的位置（install/update 会拷过去）
     "panel_dir": f"{INSTALL_ETC}/panel",
@@ -186,8 +194,9 @@ def build(settings, sub):
             print(f"跳过不支持的节点: {p['name']} ({p['type']})", file=sys.stderr)
             continue
         srv = servers.get(p["server"])
-        if srv and p["type"] == "hysteria2" and s["hy2_brutal"]:
-            o.update(s["hy2_brutal"])  # 自有服务器的 Hy2（v6 入口、[免流]、[v4直连] 三个版本）都用 Brutal
+        brutal = srv.get("hy2_brutal", s["hy2_brutal"]) if srv else None
+        if p["type"] == "hysteria2" and brutal:
+            o.update(brutal)  # 自有服务器的 Hy2（v6 入口、[免流]、[v4直连] 三个版本）都用 Brutal
         if srv and p["type"] in ENTRY_PROTOCOLS and (p["type"] != "vless" or "reality-opts" in p):
             e = json.loads(json.dumps(o))  # 派生 v6 入口：同端口同凭据，只换地址
             e.update(server=srv["v6"], tag=f"{srv['label']} v6 · {ENTRY_PROTOCOLS[p['type']]}")
@@ -227,11 +236,14 @@ def build(settings, sub):
     hks = [dict(h) for h in s.get("hk_outbounds") or [dict(s["hk_outbound"], port=s["hk_port"])]]
     hk_ports = [(h.pop("port"), h) for h in hks]
     service_members = [ABROAD, ORACLE_EXIT, CN6, CN4, D_V6PREF, D_V4, *landings, *v4_landings]
+    proto_tags = [e["tag"] for e in entry_nodes if e["type"] == s["entry_default"]]
+    proto_auto = PROTO_AUTO.format(ENTRY_PROTOCOLS[s["entry_default"]]) if proto_tags else None
+    urltest = lambda t, members: {"type": "urltest", "tag": t, "outbounds": members, "url": DELAY_URL,
+                                  "interval": "3m", "tolerance": 50, "idle_timeout": "30m"}
     outbounds = [
-        selector(ENTRY, [AUTO, *entry_tags, D_ANY],
-                 next((e["tag"] for e in entry_nodes if e["type"] == s["entry_default"]), AUTO)),
-        {"type": "urltest", "tag": AUTO, "outbounds": entry_tags, "url": DELAY_URL,
-         "interval": "3m", "tolerance": 50, "idle_timeout": "30m"},
+        selector(ENTRY, [*([proto_auto] if proto_auto else []), AUTO, *entry_tags, D_ANY], proto_auto or AUTO),
+        *([urltest(proto_auto, proto_tags)] if proto_auto else []),
+        urltest(AUTO, entry_tags),
         selector(ABROAD, landings + v4_landings, tag[s["default_landing"]]),
         selector(CN6, [D_V6, D_V6PREF, ORACLE_EXIT], D_V6),
         selector(CN4, [ORACLE_EXIT, D_V4, D_V6PREF], ORACLE_EXIT),
@@ -429,7 +441,7 @@ def main():
     panel = ROOT / "out" / "panel"
     panel.mkdir(parents=True, exist_ok=True)
     shutil.copy(ROOT / "panel" / "index.html", panel / "index.html")
-    entries = [t for t in next(o for o in cfg["outbounds"] if o["tag"] == ENTRY)["outbounds"] if t not in (AUTO, D_ANY)]
+    entries = [t for t in next(o for o in cfg["outbounds"] if o["tag"] == ENTRY)["outbounds"] if t not in (AUTO, D_ANY) and not t.endswith("· 自动（港机优先）")]
     (panel / "groups.json").write_text(json.dumps(panel_meta(cfg, entries), ensure_ascii=False, indent=1),
                                        encoding="utf-8")
     sel = {o["tag"]: o["default"] for o in cfg["outbounds"] if o["type"] == "selector"}

@@ -12,6 +12,7 @@ ORACLE_EXIT = "隧道直出"  # 只含 ① 的分组：作为「出口」时语�
 D_V6PREF, D_V4, D_V6 = "本机直连·IPv6优先", "本机直连·仅IPv4", "本机直连·仅IPv6"
 D_ANY = "不走隧道（本机直连）"
 AUTO = "自动选择（最快可用）"  # ① 里的 urltest：定时测速，自动避开挂掉的入口
+PROTO_AUTO = "{} · 自动（港机优先）"  # 只在各服务器同一协议的入口间测速（entry_default 指定协议时生成）
 FREE, V4 = "[免流] ", "[v4直连] "  # 节点前缀：第一跳走 ① 免流隧道（免费） / 本机 v4 直接连（计费）
 
 # 订阅节点名 → 面板显示名（不含前缀）。中转链写成「落地 · 经X中转」，避免和链路箭头混淆
@@ -33,7 +34,7 @@ DISPLAY_NAMES = {
 
 # 出口选项的说明（面板里显示在选项下方）
 OPTION_NOTES = {
-    ORACLE_EXIT: "走 ① 免流隧道，直接从入口那台服务器出去（目前是 Netcup 德国机房 IP，免费）",
+    ORACLE_EXIT: "走 ① 免流隧道，直接从入口那台服务器出去（默认 Azure 香港机房 IP；港机流量超限时自动变成 Netcup 德国，免费）",
     ABROAD: "跟随「② 国外出口」的选择",
     CN6: "跟随「③ 国内·有IPv6」",
     CN4: "跟随「④ 国内·仅IPv4」",
@@ -43,19 +44,21 @@ OPTION_NOTES = {
     D_ANY: "不走隧道。离开校园网（没有 v6）时选这个",
     AUTO: "每 3 分钟测一次所有入口，自动用最快且可用的；某台服务器挂了会自动换",
 }
+OPTION_NOTES.update({PROTO_AUTO.format(p): f"每 3 分钟测一次各服务器的 {p} 入口：平时用港机，港机挂了或流量超限停机时自动换 Netcup"
+                     for p in ("Hysteria2", "TUIC", "Reality", "AnyTLS")})
 
 # 基础分组：(名称, 说明)
 BASE_GROUPS = [
     (ENTRY, "决定流量怎么离开校园网（第一跳）。所有带 [免流] 的节点和「隧道直出」都先走这里。"
-            "默认「Hysteria2」入口（Brutal 模式：按设定带宽发包、丢包不降速，适合丢包多的出国线路）。"
-            "「自动选择」会定时测速、用最快且可用的入口，某台服务器挂了会自动换，但入口挂了时 Hysteria2 不会自动切。"
+            "默认「Reality · 自动（港机优先）」：走 TCP，平时用 Azure 香港（延迟约 50ms，实测 TCP 可跑约 140Mbps）；港机每月出站到 130GB 会自动停代理，这时自动换到 Netcup 德国的 Reality。「自动选择」则在所有协议的入口里挑最快的。"
+            "手动指定某个入口后，该入口挂了不会自动切。"
             "也可手动指定某个入口协议（Hysteria2/TUIC 走 UDP 通常更快，Reality/AnyTLS 走 TCP 更稳）。"
             "离开校园网时选「不走隧道」，[免流] 节点会自动变成普通直连代理。"),
     (ABROAD, "国外网站最终从哪里出去（落地），也是所有没被规则匹配到的流量的兜底。"
              "[免流] = 先走 ① 隧道再到该落地（免费）；[v4直连] = 本机直接用 IPv4 连该落地（延迟低、计费）。"
              "大多数业务分组默认「跟随② 国外出口」，改这里它们一起变。"),
     (CN6, "国内网站、且查得到 IPv6 地址时走这里。默认「本机直连·仅IPv6」，校园网 v6 免费。"),
-    (CN4, "国内网站、但只有 IPv4 时走这里。默认「隧道直出」（免费，但对方看到海外机房 IP、延迟较高）；"
+    (CN4, "国内网站、但只有 IPv4 时走这里。默认「隧道直出」（免费，对方看到香港机房 IP）；"
           "遇到不认海外 IP 的网站，可临时切到「本机直连·仅IPv4」（计费）。"),
 ]
 
@@ -79,9 +82,9 @@ SERVICE_GROUPS = [
      V4 + "美国家宽 Sixtynet · 经搬瓦工中转", "before_cn"),
     ("📢 谷歌推送", "Google FCM 推送通道（安卓模拟器、部分 App 的消息推送）。",
      {"rule_sets": ["geosite/googlefcm"]}, ABROAD, "before_cn"),
-    ("📺 YouTube", "YouTube 视频与 App。流量大，默认「[免流] Netcup 德国 · Hysteria2」：只经一跳隧道，建连比绕美国家宽快一倍，"
-                 "看视频不需要家宽 IP。",
-     {"rule_sets": ["geosite/youtube"]}, FREE + "Netcup 德国 · Hysteria2", "before_cn"),
+    ("📺 YouTube", "YouTube 视频与 App。流量大，默认「隧道直出」：从免流入口（默认 Azure 香港）直接出去，只经一跳、延迟最低，"
+                 "看视频不需要家宽 IP。注意它会消耗港机每月 130GB 出站额度。",
+     {"rule_sets": ["geosite/youtube"]}, ORACLE_EXIT, "before_cn"),
     ("🎬 流媒体", "Netflix、Disney+、Spotify。需要解锁特定地区时在这里换落地。",
      {"rule_sets": ["geosite/netflix", "geosite/disney", "geosite/spotify"]}, ABROAD, "before_cn"),
     ("✈️ Telegram", "Telegram 的域名与 IP 段。",
