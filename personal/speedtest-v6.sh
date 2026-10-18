@@ -14,7 +14,7 @@ OUT="$(cd "$(dirname "$0")" && pwd)/out/speedtest-v6.txt"
 [ "$(id -u)" = 0 ] || { echo "请用 sudo 运行"; exit 1; }
 
 # 以普通用户身份 ssh（用他的 known_hosts），走 v6 地址
-vps() { sudo -u "${SUDO_USER:-nk}" ssh -o ConnectTimeout=10 -o HostKeyAlias=203.0.113.20 -o IdentitiesOnly=yes -i "$KEY" "user@$N6" "$@"; }
+vps() { sudo -u "${SUDO_USER:-nk}" ssh -o ConnectTimeout=10 -o HostKeyAlias=203.0.113.20 -o IdentitiesOnly=yes -i "$KEY" -p 22 "user@$N6" "$@"; }
 
 IPERF=$(sudo -u "${SUDO_USER:-nk}" bash -lc 'command -v iperf3' || true)
 [ -n "$IPERF" ] || { echo "本机缺 iperf3，先运行：brew install iperf3"; exit 1; }
