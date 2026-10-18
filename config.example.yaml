@@ -1,0 +1,43 @@
+# 复制为 config.yaml 再改（config.yaml 不会被 git 提交）。所有项都可省略，省略即用默认值。
+# 完整默认值与说明见 lib/build.js 里的 DEFAULTS。
+
+# 面板（mac/windows）的登录密钥，随便填一串足够长的随机字符
+clash_api_secret: "change-me-to-a-long-random-string"
+
+# ---------- 模式一：v6 优先直连（不需要服务器） ----------
+# 什么都不填就是纯直连：国内能 v6 就 v6（免费），否则 v4（计费）。
+# 想让国外流量走自己的机场，填订阅（Clash / mihomo 格式）。节点地址是域名且有 IPv6 时会用 v6 连过去（免费）。
+# subscription_url: "https://example.com/sub?token=xxx"
+
+# 也可以直接写节点（mihomo 格式），会和订阅合并
+# nodes:
+#   - { name: "我的节点", type: hysteria2, server: example.com, port: 443, password: "xxx", sni: example.com }
+
+# ② 国外出口 默认用哪个节点（节点名）；不填 = 第一个
+# default_landing: "我的节点"
+
+# ---------- 模式二：自带双栈服务器（v6 进、v4 出，只有 v4 的流量也免费） ----------
+# 填了 entry_servers 就是模式二。key 是节点里的 server（服务器的 IPv4），v6 填服务器的 IPv6。
+# 服务器上需要有监听 :: 的 hysteria2 / tuic / vless-reality / anytls 节点，节点本身写在 nodes 或订阅里。
+# entry_servers:
+#   "203.0.113.10":
+#     v6: "2001:db8::10"
+#     label: "我的服务器"
+#     # hy2_brutal: { up_mbps: 30, down_mbps: 100 }   # 可选：Hysteria2 用 Brutal，按实测带宽填
+#     # landing: true                                  # 可选：同时作为国外落地（默认只当入口）
+# entry_default: vless    # ① 免流隧道 默认协议：hysteria2 / tuic / vless / anytls；不填 = 全部入口里自动选最快
+
+# ---------- 分组 ----------
+# 改某个业务分组的默认出口（分组名见面板，出口名必须是该分组里的选项）
+# group_defaults:
+#   "🤖 AI": "我的节点"
+#   "📺 YouTube": "② 国外出口"
+
+# 节点在面板里显示的名字
+# display_names:
+#   "🇺🇸 节点A": "美国 A"
+
+# ---------- 桌面固定端口（mac/windows，可选） ----------
+# 每个端口固定走一个出口，不受分组影响（例：给指纹浏览器）
+# fixed_ports:
+#   - { port: 10812, outbound: "本机直连·仅IPv4", page: "🔌 本机直连" }

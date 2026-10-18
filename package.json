@@ -1,0 +1,6 @@
+{
+  "name": "neu-v6-free",
+  "private": true,
+  "type": "module",
+  "bin": { "neu-v6": "cli.js" }
+}

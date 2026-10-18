@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>东大免流面板</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --side: #eef0f3; --text: #1d2129; --muted: #6b7280;
+    --line: #e2e5ea; --accent: #2563eb; --accent-soft: #e8efff; --ok: #16a34a; --warn: #d97706; --bad: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15171c; --panel: #1d2027; --side: #191b21; --text: #e6e8ec; --muted: #9aa1ad;
+      --line: #2b2f38; --accent: #6b9bff; --accent-soft: #233150; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+         background: var(--bg); color: var(--text); }
+  .app { display: grid; grid-template-columns: 240px 1fr; height: 100vh; }
+  nav { background: var(--side); border-right: 1px solid var(--line); overflow-y: auto; padding: 12px 8px; }
+  nav h1 { font-size: 15px; margin: 4px 10px 12px; }
+  nav .sec { font-size: 12px; color: var(--muted); margin: 14px 10px 4px; }
+  nav button { display: block; width: 100%; text-align: left; border: 0; background: none; color: inherit;
+               padding: 7px 10px; border-radius: 8px; cursor: pointer; font: inherit; }
+  nav button:hover { background: var(--line); }
+  nav button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  nav button small { display: block; color: var(--muted); font-weight: 400; font-size: 12px;
+                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  main { overflow-y: auto; padding: 24px 28px 40px; }
+  .head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .head h2 { margin: 0; font-size: 22px; }
+  .desc { color: var(--muted); max-width: 820px; margin: 8px 0 18px; }
+  .pill { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 2px 10px; font-size: 13px; }
+  .btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px;
+         padding: 6px 12px; cursor: pointer; font: inherit; }
+  .btn:hover { border-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+  .opt { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+         cursor: pointer; display: flex; flex-direction: column; gap: 3px; min-height: 74px; }
+  .opt:hover { border-color: var(--accent); }
+  .opt.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .opt .row { display: flex; justify-content: space-between; gap: 8px; }
+  .opt .name { font-weight: 600; word-break: break-all; }
+  .opt .note { color: var(--muted); font-size: 12px; }
+  .opt .tag { font-size: 11px; color: var(--muted); }
+  .delay { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .d-ok { color: var(--ok); } .d-mid { color: var(--warn); } .d-bad { color: var(--bad); }
+  .subhead { margin: 22px 0 8px; font-size: 13px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--panel); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; word-break: break-all; }
+  th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
+  input[type=text], input[type=password] { border: 1px solid var(--line); background: var(--panel); color: var(--text);
+         border-radius: 8px; padding: 7px 10px; font: inherit; min-width: 260px; }
+  .login { max-width: 420px; margin: 18vh auto; background: var(--panel); padding: 24px; border-radius: 12px; border: 1px solid var(--line); }
+  .login p { color: var(--muted); }
+  ol.prio li { margin: 4px 0; }
+  .err { color: var(--bad); }
+  @media (max-width: 720px) { .app { grid-template-columns: 1fr; height: auto; } nav { max-height: 40vh; } main { padding: 16px; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const API = location.origin;
+const DELAY_URL = "https://www.gstatic.com/generate_204";
+let secret = localStorage.getItem("neu-secret") || "";
+let meta = null, proxies = {}, delays = {}, page = localStorage.getItem("neu-page") || "";
+let connTimer = null, connFilter = "";
+
+const $ = (h) => { const t = document.createElement("template"); t.innerHTML = h.trim(); return t.content.firstChild; };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function api(path, opt = {}) {
+  const r = await fetch(API + path, { ...opt, headers: { Authorization: "Bearer " + secret, "Content-Type": "application/json" } });
+  if (r.status === 401) { localStorage.removeItem("neu-secret"); secret = ""; renderLogin("密钥不对，请重新输入"); throw new Error("401"); }
+  if (!r.ok) throw new Error(await r.text());
+  return r.status === 204 ? null : r.json();
+}
+
+function renderLogin(msg = "") {
+  stopConn();
+  const root = document.getElementById("root");
+  root.innerHTML = "";
+  const box = $(`<div class="login"><h2>东大免流面板</h2>
+    <p>输入 sing-box 的 Clash API 密钥（配置文件里的 clash_api_secret）。</p>
+    <input type="password" id="sec" placeholder="密钥"> <button class="btn" id="go">进入</button>
+    <p class="err">${esc(msg)}</p></div>`);
+  root.append(box);
+  const go = async () => { secret = box.querySelector("#sec").value.trim(); localStorage.setItem("neu-secret", secret); start(); };
+  box.querySelector("#go").onclick = go;
+  box.querySelector("#sec").onkeydown = (e) => e.key === "Enter" && go();
+}
+
+async function load() {
+  proxies = (await api("/proxies")).proxies;
+}
+
+function optNote(name) {
+  if (meta.notes[name]) return meta.notes[name];
+  if (meta.node_notes[name]) return meta.node_notes[name];
+  const t = proxies[name]?.type;
+  if (t === "URLTest") return "自动选择，当前：" + (proxies[name].now || "测速中");
+  return t === "Selector" ? "跟随该分组的选择" : "";
+}
+
+function delayHtml(name) {
+  const d = delays[name];
+  if (d === undefined) return "";
+  if (d === "…") return `<span class="delay">测试中…</span>`;
+  if (!d) return `<span class="delay d-bad">超时</span>`;
+  const c = d < 300 ? "d-ok" : d < 700 ? "d-mid" : "d-bad";
+  return `<span class="delay ${c}">${d} ms</span>`;
+}
+
+function renderNav() {
+  const nav = document.querySelector("nav");
+  nav.innerHTML = `<h1>东大免流面板</h1>`;
+  const item = (key, label, sub) => {
+    const b = $(`<button class="${page === key ? "on" : ""}">${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ""}</button>`);
+    b.onclick = () => go(key); nav.append(b);
+  };
+  nav.append($(`<div class="sec">基础分组</div>`));
+  meta.groups.filter((g) => g.kind === "base").forEach((g) => item("g:" + g.name, g.name, proxies[g.name]?.now));
+  nav.append($(`<div class="sec">业务分组</div>`));
+  meta.groups.filter((g) => g.kind === "service").forEach((g) => item("g:" + g.name, g.name, proxies[g.name]?.now));
+  nav.append($(`<div class="sec">其他</div>`));
+  meta.info.forEach((i) => item("i:" + i.name, i.name));
+  item("conn", "🔌 实时连接", "看每个 App 走的哪条");
+  item("help", "📖 分流说明", "优先级与规则");
+}
+
+function go(key) { page = key; localStorage.setItem("neu-page", key); render(); }
+
+function renderGroup(name) {
+  const g = meta.groups.find((x) => x.name === name);
+  const p = proxies[name];
+  const main = document.querySelector("main");
+  if (!p) { main.innerHTML = `<p class="err">sing-box 里没有这个分组：${esc(name)}（配置和面板版本不一致？）</p>`; return; }
+  main.innerHTML = "";
+  const head = $(`<div class="head"><h2>${esc(name)}</h2><span class="pill">当前：${esc(p.now)}</span></div>`);
+  const test = $(`<button class="btn">测延迟</button>`);
+  test.onclick = () => testAll(p.all);
+  head.append(test);
+  if (g.default && g.default !== p.now) {
+    const reset = $(`<button class="btn">恢复默认（${esc(g.default)}）</button>`);
+    reset.onclick = () => choose(name, g.default);
+    head.append(reset);
+  }
+  main.append(head, $(`<p class="desc">${esc(g.desc)}</p>`));
+
+  // 分区：跟随分组 / 直连 / 免流落地 / v4 直连落地
+  const kinds = { follow: [], direct: [], free: [], v4: [] };
+  for (const n of p.all) {
+    const t = proxies[n]?.type;
+    if (t === "Selector" || t === "URLTest") kinds.follow.push(n);
+    else if (t === "Direct") kinds.direct.push(n);
+    else if (n.startsWith(meta.v4_prefix)) kinds.v4.push(n);
+    else kinds.free.push(n);
+  }
+  const titles = { follow: "跟随其他分组 / 出口", direct: "本机直连（不走隧道）", free: "节点",
+    v4: "[v4直连] 节点：本机直接用 IPv4 连过去（延迟低、计费）" };
+  if (name === "① 免流隧道") { titles.free = "隧道入口（通过校园网 IPv6 连到服务器）"; titles.follow = "自动"; }
+  else titles.free = "[免流] 节点：先走 ① 免流隧道，再到该落地（免费）";
+  for (const k of ["follow", "direct", "free", "v4"]) {
+    if (!kinds[k].length) continue;
+    main.append($(`<div class="subhead">${titles[k]}</div>`));
+    const grid = $(`<div class="grid"></div>`);
+    for (const n of kinds[k]) {
+      const card = $(`<div class="opt ${n === p.now ? "on" : ""}">
+        <div class="row"><span class="name">${esc(n)}</span>${delayHtml(n)}</div>
+        <span class="note">${esc(optNote(n))}</span>
+        <span class="tag">${esc(proxies[n]?.type || "")}${n === g.default ? " · 默认" : ""}</span></div>`);
+      card.onclick = () => choose(name, n);
+      grid.append(card);
+    }
+    main.append(grid);
+  }
+}
+
+async function choose(group, name) {
+  try { await api("/proxies/" + encodeURIComponent(group), { method: "PUT", body: JSON.stringify({ name }) }); }
+  catch (e) { if (e.message !== "401") alert("切换失败：" + e.message); return; }
+  await load(); render();
+}
+
+async function testAll(list) {
+  list.forEach((n) => (delays[n] = "…")); render();
+  await Promise.all(list.map(async (n) => {
+    try {
+      const r = await api(`/proxies/${encodeURIComponent(n)}/delay?timeout=6000&url=${encodeURIComponent(DELAY_URL)}`);
+      delays[n] = r.delay || 0;
+    } catch { delays[n] = 0; }
+    if (page.startsWith("g:")) renderGroup(page.slice(2));
+  }));
+}
+
+function renderInfo(name) {
+  const i = meta.info.find((x) => x.name === name);
+  document.querySelector("main").innerHTML = `<div class="head"><h2>${esc(i.name)}</h2></div><p class="desc">${esc(i.desc)}</p>`;
+}
+
+function renderHelp() {
+  const svc = meta.groups.filter((g) => g.kind === "service").map((g) => `<li><b>${esc(g.name)}</b>：${esc(g.desc)}</li>`).join("");
+  document.querySelector("main").innerHTML = `<div class="head"><h2>📖 分流说明</h2></div>
+  <p class="desc">每个连接从上往下匹配，<b>命中第一条就停</b>，所以分组之间不会冲突。<br>
+  一条连接 = <b>第一跳</b>（① 免流隧道 决定怎么离开校园网）+ <b>出口</b>（各分组决定最后从哪出去）。<br>
+  命名：<b>[免流]</b> 先走隧道再到该落地（免费）；<b>[v4直连]</b> 本机直接用 IPv4 连（计费）；
+  <b>隧道直出</b> 走隧道后直接从隧道服务器出去；<b>本机直连·…</b> 不走隧道。<br>
+  业务分组选「② 国外出口」等于跟随它，改一处多个业务一起变。</p>
+  <ol class="prio">
+    <li>端口 10809 进来的流量 → 固定 HK 家宽（指纹浏览器专用）</li>
+    <li>局域网、校园网（neu.edu.cn）→ 直连</li>
+    <li>按进程：豆包输入法、微信 → 各自分组</li>
+    <li><b>总原则：国内资源只要查得到 IPv6 → ③ 国内·有IPv6</b>（v6 直连，免费最快；苹果、微软、Steam、B站等的国内 CDN 也在这一步）</li>
+    <li>按网站：业务分组（见下），优先级与左侧顺序相同；📱 B站·抖音·小红书 这里只管它们纯 IPv4 的部分</li>
+    <li>其余只有 IPv4 的国内网站 → ④ 国内·仅IPv4</li>
+    <li>🎯 海外游戏（国内游戏已在上一步处理）</li>
+    <li>直接访问国内 IPv4 地址 → ④ 国内·仅IPv4</li>
+    <li>剩下的全部 → ② 国外出口</li>
+  </ol>
+  <div class="subhead">业务分组</div><ul>${svc}</ul>`;
+}
+
+function stopConn() { if (connTimer) { clearInterval(connTimer); connTimer = null; } }
+
+function renderConn() {
+  const main = document.querySelector("main");
+  main.innerHTML = "";
+  const head = $(`<div class="head"><h2>🔌 实时连接</h2></div>`);
+  const filter = $(`<input type="text" placeholder="过滤：域名 / 进程 / 分组，如 微信">`);
+  filter.value = connFilter;
+  filter.oninput = () => { connFilter = filter.value; draw(); };
+  head.append(filter);
+  const stat = $(`<span class="pill"></span>`);
+  head.append(stat);
+  const table = $(`<table><thead><tr><th>目标</th><th>进程</th><th>命中规则</th><th>链路（落地 ← 分组）</th><th>流量</th></tr></thead><tbody></tbody></table>`);
+  main.append(head, $(`<p class="desc">每 2 秒刷新。「链路」最左边是实际出口。</p>`), table);
+  let data = [];
+  const fmt = (b) => b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : b > 1024 ? (b / 1024).toFixed(0) + " KB" : b + " B";
+  function draw() {
+    const f = connFilter.toLowerCase();
+    const rows = data.filter((c) => !f || JSON.stringify([c.metadata.host, c.metadata.processPath, c.rule, c.chains]).toLowerCase().includes(f));
+    stat.textContent = `${rows.length} / ${data.length} 条`;
+    table.tBodies[0].innerHTML = rows.map((c) => {
+      const m = c.metadata, proc = (m.processPath || "").split("/").pop();
+      return `<tr><td>${esc(m.host || m.destinationIP)}:${esc(m.destinationPort)} <span class="tag">${esc(m.network)}</span></td>
+        <td>${esc(proc)}</td><td>${esc(c.rule)} ${esc(c.rulePayload)}</td><td>${esc(c.chains.join(" ← "))}</td>
+        <td>↓${fmt(c.download)} ↑${fmt(c.upload)}</td></tr>`;
+    }).join("");
+  }
+  async function tick() {
+    try { data = ((await api("/connections")).connections || []).sort((a, b) => (b.start > a.start ? 1 : -1)); draw(); } catch { }
+  }
+  tick(); connTimer = setInterval(tick, 2000);
+}
+
+function render() {
+  stopConn();
+  renderNav();
+  if (page.startsWith("g:") && meta.groups.some((g) => "g:" + g.name === page)) renderGroup(page.slice(2));
+  else if (page.startsWith("i:")) renderInfo(page.slice(2));
+  else if (page === "conn") renderConn();
+  else if (page === "help") renderHelp();
+  else { page = "g:" + meta.groups[0].name; renderGroup(meta.groups[0].name); renderNav(); }
+}
+
+async function start() {
+  if (!secret) return renderLogin();
+  try {
+    meta = await (await fetch("groups.json", { cache: "no-store" })).json();
+    await load();
+  } catch (e) { if (e.message !== "401") renderLogin("连接失败：" + e.message); return; }
+  document.getElementById("root").innerHTML = `<div class="app"><nav></nav><main></main></div>`;
+  render();
+}
+start();
+</script>
+</body>
+</html>
