@@ -6,7 +6,6 @@ entry_servers:
 default_landing: "🇺🇸 家宽Sixtynet"
 hy2_brutal: {up_mbps: 30, down_mbps: 100}
 entry_default: vless
-proto_auto_name: "{} · 自动（港机优先）"
 exclude_nodes_regex: "Oracle-SJ-ARM(-v6)?$"
 entry_group_aliases: ["🆓 免流入口"]
 # 订阅（妙妙屋 自用东大版）已用 dialer-proxy 标好哪些节点走免流入口；CF优选节点有意不挂，所以不自动加
@@ -36,7 +35,7 @@ panel_pages:
 
 # 面板说明里的个人信息（通用版是中性措辞）
 base_notes:
-  ① 免流隧道: 决定流量怎么离开校园网（第一跳）。所有带 [免流] 的节点和「隧道直出」都先走这里。默认「Reality · 自动（港机优先）」：走 TCP，平时用 Azure 香港（延迟约 50ms，实测 TCP 可跑约 140Mbps）；港机每月出站到 130GB 会自动停代理，这时自动换到 Netcup 德国的 Reality。「自动选择」则在所有协议的入口里挑最快的。手动指定某个入口后，该入口挂了不会自动切。也可手动指定某个入口协议（Hysteria2/TUIC 走 UDP 通常更快，Reality/AnyTLS 走 TCP 更稳）。离开校园网时选「不走隧道」，[免流] 节点会自动变成普通直连代理。
+  ① 免流隧道: 决定流量怎么离开校园网（第一跳）。所有带 [免流] 的节点和「隧道直出」都先走这里。默认「Azure 香港 v6 · Reality」：走 TCP，延迟约 50ms，实测可跑约 140Mbps。港机每月出站到 130GB 会自动停代理，这时请手动切到 Netcup 的入口或「自动选择」（在全部入口里挑最快可用的，挂了会自动换）。Hysteria2/TUIC 走 UDP，Reality/AnyTLS 走 TCP。离开校园网时选「不走隧道」，[免流] 节点会自动变成普通直连代理。
   ④ 国内·仅IPv4: 国内网站、但只有 IPv4 时走这里。默认「隧道直出」（免费，对方看到香港机房 IP）；遇到不认海外 IP 的网站，可临时切到「本机直连·仅IPv4」（计费）。
 group_notes:
   🤖 AI: ChatGPT、Claude、Gemini、Perplexity 等海外 AI 服务。默认「[v4直连] 美国家宽 Sixtynet · 经搬瓦工中转」（家宽 IP，延迟低，计费）；想省流量可切到 [免流] 版本。
