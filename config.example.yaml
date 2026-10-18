@@ -13,7 +13,7 @@ clash_api_secret: "change-me-to-a-long-random-string"
 # nodes:
 #   - { name: "我的节点", type: hysteria2, server: example.com, port: 443, password: "xxx", sni: example.com }
 
-# ② 国外出口 默认用哪个节点（节点名）；不填 = 第一个
+# 「国外网站」默认用哪个节点（节点名）；不填 = 第一个
 # default_landing: "我的节点"
 
 # ---------- 模式二：自带双栈服务器（v6 进、v4 出，只有 v4 的流量也免费） ----------
@@ -25,13 +25,14 @@ clash_api_secret: "change-me-to-a-long-random-string"
 #     label: "我的服务器"
 #     # hy2_brutal: { up_mbps: 30, down_mbps: 100 }   # 可选：Hysteria2 用 Brutal，按实测带宽填
 #     # landing: true                                  # 可选：同时作为国外落地（默认只当入口）
-# entry_default: vless    # ① 免流隧道 默认协议：hysteria2 / tuic / vless / anytls；不填 = 全部入口里自动选最快
+# entry_default: vless    # 「免流服务器」默认用第一台服务器的哪个协议：hysteria2 / tuic / vless / anytls；不填 = 全部入口里自动选最快
 
 # ---------- 分组 ----------
 # 改某个业务分组的默认出口（分组名见面板，出口名必须是该分组里的选项）
 # group_defaults:
 #   "🤖 AI": "我的节点"
-#   "📺 YouTube": "② 国外出口"
+#   "📺 YouTube": "国外网站"
+#   "国内仅 v4 网站": "直连 v4"     # 没有 IPv6 的国内网站也直连（计费，网站看到校园网 IP）
 
 # 节点在面板里显示的名字
 # display_names:

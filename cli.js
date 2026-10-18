@@ -82,7 +82,7 @@ async function main() {
     }
     if (platform === "mac") await downloadRuleSets(settings.rule_set_base || DEFAULTS.rule_set_base, path.join(dir, "rules"));
     const groups = config.outbounds.filter((o) => o.type === "selector").length;
-    console.log(`已生成 ${cfgPath}（${mode === "tunnel" ? "模式二·免流隧道" : "模式一·v6 优先直连"}，${config.outbounds.length} 个出站、${groups} 个分组）`);
+    console.log(`已生成 ${cfgPath}（${mode === "tunnel" ? "模式二·自带服务器" : "模式一·v6 优先直连"}，${config.outbounds.length} 个出站、${groups} 个分组）`);
   }
 }
 

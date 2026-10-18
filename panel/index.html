@@ -148,19 +148,18 @@ function renderGroup(name) {
   }
   main.append(head, $(`<p class="desc">${esc(g.desc)}</p>`));
 
-  // 分区：跟随分组 / 直连 / 免流落地 / v4 直连落地
+  // 分区：跟随开关 / 直连 / 服务器入口或经服务器的落地 / 校园网 v4 直接连的落地
   const kinds = { follow: [], direct: [], free: [], v4: [] };
   for (const n of p.all) {
     const t = proxies[n]?.type;
     if (t === "Selector" || t === "URLTest") kinds.follow.push(n);
     else if (t === "Direct") kinds.direct.push(n);
-    else if (n.startsWith(meta.v4_prefix)) kinds.v4.push(n);
+    else if (n.endsWith(meta.v4_suffix)) kinds.v4.push(n);
     else kinds.free.push(n);
   }
-  const titles = { follow: "跟随其他分组 / 出口", direct: "本机直连（不走隧道）", free: "节点",
-    v4: "[v4直连] 节点：本机直接用 IPv4 连过去（延迟低、计费）" };
-  if (name === "① 免流隧道") { titles.free = "隧道入口（通过校园网 IPv6 连到服务器）"; titles.follow = "自动"; }
-  else titles.free = "[免流] 节点：先走 ① 免流隧道，再到该落地（免费）";
+  const titles = { follow: "跟随开关 / 免流服务器", direct: "直连（校园网直接出去）", free: "经服务器的落地（免费）",
+    v4: "直连 v4 的落地（校园网 v4 直接连过去，计费）" };
+  if (name === meta.entry) { titles.free = "服务器入口（校园网 IPv6 连过去，免费）"; titles.follow = "自动"; }
   for (const k of ["follow", "direct", "free", "v4"]) {
     if (!kinds[k].length) continue;
     main.append($(`<div class="subhead">${titles[k]}</div>`));
@@ -201,24 +200,24 @@ function renderInfo(name) {
 
 function renderHelp() {
   const svc = meta.groups.filter((g) => g.kind === "service").map((g) => `<li><b>${esc(g.name)}</b>：${esc(g.desc)}</li>`).join("");
+  const base = meta.groups.filter((g) => g.kind === "base").map((g) => `<li><b>${esc(g.name)}</b>：${esc(g.desc)}</li>`).join("");
   document.querySelector("main").innerHTML = `<div class="head"><h2>📖 分流说明</h2></div>
-  <p class="desc">每个连接从上往下匹配，<b>命中第一条就停</b>，所以分组之间不会冲突。<br>
-  一条连接 = <b>第一跳</b>（① 免流隧道 决定怎么离开校园网）+ <b>出口</b>（各分组决定最后从哪出去）。<br>
-  命名：<b>[免流]</b> 先走隧道再到该落地（免费）；<b>[v4直连]</b> 本机直接用 IPv4 连（计费）；
-  <b>隧道直出</b> 走隧道后直接从隧道服务器出去；<b>本机直连·…</b> 不走隧道。<br>
-  业务分组选「② 国外出口」等于跟随它，改一处多个业务一起变。</p>
+  <p class="desc">只用两个词：<b>服务器</b> = 经自己的服务器出去（校园网 IPv6 连过去，免费）；
+  <b>直连</b> = 校园网直接出去（v6 免费，v4 计费）。<br>
+  落地节点：<b>（经服务器）</b> 先到免流服务器再到该落地，免费；<b>（直连 v4）</b> 校园网 v4 直接连，计费。<br>
+  每个连接从上往下匹配，<b>命中第一条就停</b>，所以分组之间不会冲突。最多两层：例外分组 → 总开关 → 节点。</p>
   <ol class="prio">
-    <li>端口 10809 进来的流量 → 固定 HK 家宽（指纹浏览器专用）</li>
-    <li>局域网、校园网（neu.edu.cn）→ 直连</li>
-    <li>按进程：豆包输入法、微信 → 各自分组</li>
-    <li><b>总原则：国内资源只要查得到 IPv6 → ③ 国内·有IPv6</b>（v6 直连，免费最快；苹果、微软、Steam、B站等的国内 CDN 也在这一步）</li>
-    <li>按网站：业务分组（见下），优先级与左侧顺序相同；📱 B站·抖音·小红书 这里只管它们纯 IPv4 的部分</li>
-    <li>其余只有 IPv4 的国内网站 → ④ 国内·仅IPv4</li>
-    <li>🎯 海外游戏（国内游戏已在上一步处理）</li>
-    <li>直接访问国内 IPv4 地址 → ④ 国内·仅IPv4</li>
-    <li>剩下的全部 → ② 国外出口</li>
+    <li>固定端口进来的流量 → 各自固定的出口</li>
+    <li>局域网、校园网（neu.edu.cn）、自己的服务器 → 直连</li>
+    <li>🔐 登录·支付·银行，以及按 App 的例外（微信、网易云、豆包）</li>
+    <li><b>国内网站有 IPv6 → 直连 v6</b>（固定规则，免费最快，不用选）</li>
+    <li>国外类例外分组（AI、YouTube、苹果、Steam……）</li>
+    <li>国内网站只有 IPv4 → 「国内仅 v4 网站」开关</li>
+    <li>🎯 海外游戏</li>
+    <li>剩下的全部 → 「国外网站」开关</li>
   </ol>
-  <div class="subhead">业务分组</div><ul>${svc}</ul>`;
+  <div class="subhead">总开关</div><ul>${base}</ul>
+  <div class="subhead">例外分组</div><ul>${svc}</ul>`;
 }
 
 function stopConn() { if (connTimer) { clearInterval(connTimer); connTimer = null; } }

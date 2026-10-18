@@ -147,7 +147,7 @@ lines = [
   "# 粘贴到客户端 config.yaml（或网页生成器）。含密码，不要公开。",
   "entry_servers:",
   f"  {q(v4)}: {{ v6: {q(v6)}, label: {q(label)} }}",
-  "entry_default: vless   # ① 免流隧道 默认用 Reality（TCP）；丢包多的线路可改 hysteria2",
+  "entry_default: vless   # 「免流服务器」默认用 Reality（TCP）；丢包多的线路可改 hysteria2",
   "nodes:",
   f"  - {{ name: {q(label + '-Reality')}, type: vless, server: {q(v4)}, port: {P['reality']}, uuid: {q(s['vless_uuid'])}, flow: xtls-rprx-vision, network: tcp, tls: true, udp: true, servername: {q(s['reality_sni'])}, client-fingerprint: chrome, reality-opts: {{ public-key: {q(s['reality_pub'])}, short-id: {q(s['short_id'])} }} }}",
   f"  - {{ name: {q(label + '-AnyTLS')}, type: anytls, server: {q(v4)}, port: {P['anytls']}, password: {q(s['anytls_pass'])}, sni: www.bing.com, skip-cert-verify: true, udp: true }}",

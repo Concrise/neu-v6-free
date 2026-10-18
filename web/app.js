@@ -1,7 +1,7 @@
 // 网页生成器：全部在浏览器里完成，不上传任何内容。与命令行共用 lib/ 里的生成逻辑。
 import yaml from "../lib/js-yaml.mjs";
 import { build } from "../lib/build.js";
-import { ABROAD, CN4, CN6, ENTRY } from "../lib/groups.js";
+import { ABROAD, CN4, ENTRY } from "../lib/groups.js";
 import { makeZip } from "./zip.js";
 
 const $ = (id) => document.getElementById(id);
@@ -50,10 +50,11 @@ function randomSecret() {
 function renderGroups() {
   // 用 mac 生成分组列表：它的按 App 分组最全（其他平台没有的分组，选了也会被忽略）
   const { config, panel, warnings, mode } = build({ ...withChoices(), mac_app: true }, parsed.proxies, "mac");
+  entryNotes = Object.fromEntries(Object.entries(panel.node_notes).filter(([, n]) => n.startsWith("校园网 IPv6 连到")));
   const sel = Object.fromEntries(config.outbounds.filter((o) => o.type === "selector").map((o) => [o.tag, o]));
   const box = $("groups");
   box.innerHTML = "";
-  const base = [...(mode === "tunnel" ? [ENTRY] : []), ABROAD, CN6, CN4];
+  const base = [ENTRY, CN4, ABROAD];
   const names = [...base, ...panel.groups.map((g) => g.name).filter((n) => !base.includes(n))];
   for (const name of names) {
     const s = sel[name];
@@ -71,15 +72,17 @@ function renderGroups() {
   }
   $("warnings").textContent = warnings.join("\n");
   $("summary").textContent = mode === "tunnel"
-    ? `模式二·免流隧道：${config.outbounds.filter((o) => o.tag.includes(" v6 · ")).length} 个入口，${countNodes(config)} 个落地节点（各有 [免流] 与 [v4直连] 两个版本）`
+    ? `模式二·自带服务器：${panel.node_notes ? Object.values(panel.node_notes).filter((n) => n.startsWith("校园网 IPv6 连到")).length : 0} 个服务器入口，${countNodes(config)} 个落地节点（各有「经服务器」与「直连 v4」两个版本）`
     : `模式一·v6 优先直连：${countNodes(config)} 个订阅节点${countNodes(config) ? "" : "（全部直连）"}`;
 }
 
-// 订阅/自填节点数：不算服务器入口和 [v4直连] 副本
+// 订阅/自填节点数：不算服务器入口和「（直连 v4）」副本
 const countNodes = (cfg) => cfg.outbounds.filter((o) => !["selector", "urltest", "direct"].includes(o.type)
-  && !o.tag.includes(" v6 · ") && !(o.tag.startsWith("[v4直连] ") && cfg.outbounds.some((x) => x.tag === `[免流] ${o.tag.slice(7)}`))).length;
+  && !(o.tag.endsWith("（直连 v4）") && cfg.outbounds.some((x) => x.tag === o.tag.replace("（直连 v4）", "（经服务器）")))
+  && !Object.keys(entryNotes).includes(o.tag)).length;
+let entryNotes = {};
 
-/** 用户在页面上选的默认出口 → group_defaults（基础分组 ①②③④ 也走这里） */
+/** 用户在页面上选的默认出口 → group_defaults（三个总开关也走这里） */
 function withChoices() {
   return { ...parsed.settings, group_defaults: { ...(parsed.settings.group_defaults || {}), ...choices } };
 }
