@@ -38,4 +38,4 @@ chown root:wheel "$PLIST"; chmod 644 "$PLIST"
 # 重新加载：配置（密钥、出口）或脚本变了都要重启它
 launchctl bootout "system/$LABEL" 2>/dev/null && sleep 1 || true
 launchctl bootstrap system "$PLIST"
-echo "流量统计服务已启动（127.0.0.1:$PORT，数据在 $VAR_DIR/traffic.json）"
+echo "流量统计服务已启动（127.0.0.1:${PORT}，数据在 $VAR_DIR/traffic.json）"

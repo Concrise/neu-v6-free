@@ -21,7 +21,7 @@ grep -q "\"$ETC_DIR/rules/" "$SRC/config.json" || { echo "配置里的 rules_dir
 launchctl bootout system/$LABEL 2>/dev/null && sleep 2 || true
 PORTS=$(/usr/bin/python3 -c "import json,sys;c=json.load(open(sys.argv[1]));p=[i['listen_port'] for i in c['inbounds'] if 'listen_port' in i];a=c.get('experimental',{}).get('clash_api',{}).get('external_controller','');p+=[int(a.rsplit(':',1)[1])] if a else [];print('|'.join(map(str,p)))" "$SRC/config.json")
 if lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk -v re=":($PORTS)\$" '$9 ~ re {f=1} END {exit !f}'; then
-  echo "端口被占用（$PORTS），请先退出其他代理软件："
+  echo "端口被占用（${PORTS}），请先退出其他代理软件："
   lsof -nP -iTCP -sTCP:LISTEN | awk -v re=":($PORTS)\$" 'NR==1 || $9 ~ re'
   exit 1
 fi
