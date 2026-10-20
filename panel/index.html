@@ -261,7 +261,7 @@ function renderConn() {
   tick(); connTimer = setInterval(tick, 2000);
 }
 
-const gb = (b) => (b / 1073741824).toFixed(b >= 10737418240 ? 1 : 2) + " G";
+const gb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(b >= 10737418240 ? 1 : 2) + " G" : (b / 1048576).toFixed(b >= 104857600 ? 0 : 1) + " M";
 const rateFmt = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + " MB/s" : (b / 1024).toFixed(0) + " KB/s";
 const srvSum = (b) => Object.values(b.server || {}).reduce((x, y) => x + y, 0);
 
