@@ -25,7 +25,7 @@ display_names:   # 订阅节点名 → 面板显示名；面板会自动加「�
   "Netcup-CF-手机流量-移动-FRA": "Netcup CF优选 移动FRA"
   "Netcup-CF-家庭WiFi-联通-LAX-1": "Netcup CF优选 联通LAX"
 group_defaults:
-  "🤖 AI": "美国家宽 经搬瓦工（直连 v4）"
+  "🤖 AI": "美国家宽 经搬瓦工（经服务器）"
 rules_dir: /usr/local/etc/neu-v6-router/rules
 panel_dir: /usr/local/etc/neu-v6-router/panel
 cache_file: neu-v6-router.cache.db
@@ -38,5 +38,5 @@ panel_pages:
 base_notes:
   免流服务器: "所有免费流量经哪台服务器出去。默认港机 Reality（延迟约 50ms，实测约 140Mbps）。港机每月出站到 130GB 会自动停，这时手动换成 Netcup 的入口或「自动选最快」。离开校园网时选「不用服务器」。"
 group_notes:
-  🤖 AI: "ChatGPT、Claude、Gemini 等。默认「美国家宽 经搬瓦工（直连 v4）」：家宽 IP、延迟低，计费；想省流量可选「（经服务器）」版本。"
+  🤖 AI: "ChatGPT、Claude、Gemini 等。默认「美国家宽 经搬瓦工（经服务器）」：港机 → 搬瓦工 → Sixtynet 家宽出口，免费（算港机出站）；想要更低延迟可选「（直连 v4）」版本，计费。"
   📺 YouTube: "YouTube 视频与 App。默认从免流服务器直接出去（一跳、最快）。流量大，会消耗港机每月 130GB 出站额度。"
