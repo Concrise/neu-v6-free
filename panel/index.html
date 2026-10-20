@@ -55,6 +55,13 @@
   .login p { color: var(--muted); }
   ol.prio li { margin: 4px 0; }
   .err { color: var(--bad); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-bottom: 8px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat .k { color: var(--muted); font-size: 12.5px; }
+  .stat .v { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; margin: 2px 0; }
+  .stat .s { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .stat.free .v { color: var(--ok); } .stat.paid .v { color: var(--warn); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   @media (max-width: 720px) { .app { grid-template-columns: 1fr; height: auto; } nav { max-height: 40vh; } main { padding: 16px; } }
 </style>
 </head>
@@ -125,6 +132,7 @@ function renderNav() {
   meta.groups.filter((g) => g.kind === "service").forEach((g) => item("g:" + g.name, g.name, proxies[g.name]?.now));
   nav.append($(`<div class="sec">其他</div>`));
   meta.info.forEach((i) => item("i:" + i.name, i.name));
+  item("traffic", "📊 流量统计", "本月免流省了多少");
   item("conn", "🔌 实时连接", "看每个 App 走的哪条");
   item("help", "📖 分流说明", "优先级与规则");
 }
@@ -253,12 +261,54 @@ function renderConn() {
   tick(); connTimer = setInterval(tick, 2000);
 }
 
+const gb = (b) => (b / 1073741824).toFixed(b >= 10737418240 ? 1 : 2) + " G";
+const rateFmt = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + " MB/s" : (b / 1024).toFixed(0) + " KB/s";
+const srvSum = (b) => Object.values(b.server || {}).reduce((x, y) => x + y, 0);
+
+function renderTraffic() {
+  const main = document.querySelector("main");
+  const port = meta.traffic_port || 9091;
+  main.innerHTML = `<div class="head"><h2>📊 流量统计</h2><span class="pill" id="tf-upd"></span></div>
+    <p class="desc">按每条连接的实际出口记账，每秒更新。<b>省下的</b> = 本来要走校园网 IPv4 计费、现在免费走掉的流量（上下行合计）。
+    「经服务器免流」同时就是服务器的出站消耗（服务器一进一出，上下行都算它的出站），不含协议开销，比服务器侧统计略少。
+    「直连（v6 优先）」按 v6 计。只统计这台电脑。</p><div id="tf"></div>`;
+  async function tick() {
+    let d;
+    try { d = await (await fetch(`http://${location.hostname}:${port}/traffic`, { cache: "no-store" })).json(); }
+    catch { document.getElementById("tf").innerHTML = `<p class="err">连不上流量统计服务（127.0.0.1:${port}）。mac 上重新运行一次安装或更新脚本即可装上；其他平台暂不支持。</p>`; return; }
+    const now = new Date(), pad = (n) => String(n).padStart(2, "0");
+    const mk = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`, dk = `${mk}-${pad(now.getDate())}`;
+    const m = d.months[mk] || { v6: 0, server: {}, v4: 0, lan: 0, other: 0 }, day = d.days[dk] || m, r = d.live.rate;
+    const srv = srvSum(m), srvDay = d.days[dk] ? srvSum(day) : 0;
+    const srvList = Object.entries(m.server).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${esc(k)} ${gb(v)}`).join(" · ") || "—";
+    const card = (cls, k, v, s) => `<div class="stat ${cls}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+    const since = d.since.slice(0, 16).replace("T", " ");
+    document.getElementById("tf-upd").textContent = d.live.ok ? "实时" : "sing-box 未连接";
+    const rows = Object.keys(d.months).sort().reverse().map((k) => {
+      const x = d.months[k], s = srvSum(x);
+      return `<tr><td>${k}</td><td class="num">${gb(x.v6)}</td><td class="num">${gb(s)}</td><td class="num"><b>${gb(x.v6 + s)}</b></td><td class="num">${gb(x.v4)}</td></tr>`;
+    }).join("");
+    document.getElementById("tf").innerHTML = `<div class="subhead">本月（${mk}${since.startsWith(mk) ? `，${since.slice(5)} 起` : ""}）</div>
+      <div class="stats">
+        ${card("free", "v6 直连 · 省", gb(m.v6), `今天 ${gb(d.days[dk] ? day.v6 : 0)} · 现在 ${rateFmt(r.v6)}`)}
+        ${card("free", "v6→服务器→v4 免流 · 省（= 服务器消耗）", gb(srv), `${srvList}<br>今天 ${gb(srvDay)} · 现在 ${rateFmt(srvSum(r))}`)}
+        ${card("free", "合计省下", gb(m.v6 + srv), `今天 ${gb((d.days[dk] ? day.v6 : 0) + srvDay)}`)}
+        ${card("paid", "校园网 v4 计费", gb(m.v4), `今天 ${gb(d.days[dk] ? day.v4 : 0)} · 现在 ${rateFmt(r.v4)}`)}
+      </div>
+      <p class="desc">另有校内 / 局域网 ${gb(m.lan)}（不计费）${m.other ? `，看不出 v4 / v6 的直连 ${gb(m.other)}` : ""}。统计自 ${esc(since)}。</p>
+      <div class="subhead">按月</div>
+      <table><thead><tr><th>月份</th><th class="num">v6 直连</th><th class="num">经服务器</th><th class="num">合计省下</th><th class="num">v4 计费</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  tick(); connTimer = setInterval(tick, 2000);
+}
+
 function render() {
   stopConn();
   renderNav();
   if (page.startsWith("g:") && meta.groups.some((g) => "g:" + g.name === page)) renderGroup(page.slice(2));
   else if (page.startsWith("i:")) renderInfo(page.slice(2));
   else if (page === "conn") renderConn();
+  else if (page === "traffic") renderTraffic();
   else if (page === "help") renderHelp();
   else { page = "g:" + meta.groups[0].name; renderGroup(meta.groups[0].name); renderNav(); }
 }

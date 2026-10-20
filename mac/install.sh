@@ -17,7 +17,7 @@ PLIST=/Library/LaunchDaemons/$LABEL.plist
 [ -f "$SRC/config.json" ] || { echo "缺少 $SRC/config.json，先运行 node cli.js -p mac"; exit 1; }
 grep -q "\"$ETC_DIR/rules/" "$SRC/config.json" || { echo "配置里的 rules_dir 不是 $ETC_DIR/rules，请在设置里改 rules_dir/panel_dir 或设 NAME"; exit 1; }
 
-# 先停掉旧的自身服务；之后端口仍被占用，说明别的代理软件（v2rayN / FlClash 等）还在跑
+# 先停掉旧的自身服务（流量统计服务最后会重新装）；之后端口仍被占用，说明别的代理软件（v2rayN / FlClash 等）还在跑
 launchctl bootout system/$LABEL 2>/dev/null && sleep 2 || true
 PORTS=$(/usr/bin/python3 -c "import json,sys;c=json.load(open(sys.argv[1]));p=[i['listen_port'] for i in c['inbounds'] if 'listen_port' in i];a=c.get('experimental',{}).get('clash_api',{}).get('external_controller','');p+=[int(a.rsplit(':',1)[1])] if a else [];print('|'.join(map(str,p)))" "$SRC/config.json")
 if lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk -v re=":($PORTS)\$" '$9 ~ re {f=1} END {exit !f}'; then
@@ -59,5 +59,6 @@ chown root:wheel "$PLIST"; chmod 644 "$PLIST"
 launchctl bootstrap system "$PLIST"
 sleep 3
 launchctl print system/$LABEL | grep -E "state|pid" | head -3
+NAME=$NAME LABEL=$LABEL "$(dirname "$0")/traffic-service.sh"
 tail -5 "$VAR_DIR/sing-box.log" 2>/dev/null || true
 echo "已安装。面板 http://127.0.0.1:9090/ui ；卸载：sudo $(dirname "$0")/uninstall.sh"
