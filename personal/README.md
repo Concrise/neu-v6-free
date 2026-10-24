@@ -48,15 +48,17 @@ node ../cli.js -c profile.yaml -c config.local.yaml -p mac -o /tmp/x
 
 1. 克隆仓库：`git clone https://github.com/Concrise/neu-v6-free.git`
 2. 把 Mac 上的 `personal/config.local.yaml` 拷到 Windows 上同一位置（`servers.local.sh` 只给 Mac 测速脚本用，不需要）。
-3. 在 `personal\` 里生成：
+3. 如果 Windows 上的程序（比如 Claude Code）靠 FlClash 的代理端口上网（`HTTPS_PROXY=http://127.0.0.1:7890`），
+   写一个 `personal\windows.local.yaml`，内容 `main_port: 7890`：sing-box 接替这个端口，FlClash 退出后它们照样能用。
+4. 在 `personal\` 里生成（没有 `windows.local.yaml` 就去掉那个 `-c`）：
 
    ```powershell
-   node ..\cli.js -c profile.yaml -c config.local.yaml -p windows -o out
+   node ..\cli.js -c profile.yaml -c config.local.yaml -c windows.local.yaml -p windows -o out
    ```
 
-4. 第一次：先退出 v2rayN / Clash，在 `out\windows\install.ps1` 上右键 →「使用 PowerShell 运行」，管理员确认点「是」。
-   装到 `C:\neu-v6-free`，开机自启，面板同样是 `http://127.0.0.1:9090/ui`。
-5. 以后改了设置：重新生成，运行 `out\windows\update.ps1`（不需要管理员）。
+5. 第一次：退出 FlClash（托盘右键退出），双击 `out\windows\install.bat`，管理员确认点「是」。
+   装到 `C:\neu-v6-free`，开机自启，装完会自检，不通会自动撤回。面板同样是 `http://127.0.0.1:9090/ui`，状态页 `http://127.0.0.1:9091/`。
+6. 以后改了设置：重新生成，双击 `out\windows\update.bat`（不需要管理员）。
 
 注意 `profile.yaml` 里的 `rules_dir` / `panel_dir` 是 Mac 的路径，Windows 用的是 `windows_rules_dir` / `windows_panel_dir`（默认 `C:/neu-v6-free/…`），互不影响。
 

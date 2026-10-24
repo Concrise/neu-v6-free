@@ -24,7 +24,8 @@ try {
     throw $msg
   }
   Write-Host '已更新并重启 sing-box。' -ForegroundColor Green
-  if ($r.helper_updated) { Write-Host '本地助手也升级了，大约一分钟后自动重启（这段时间面板里暂时不能加规则）。' }
+  if ($r.server_fallback) { Write-Host '注意：当前网络连不上免流服务器，已自动改走「不用服务器」；能连上后会自动切回。' -ForegroundColor Yellow }
+  if ($r.helper_updated) { Write-Host '本地助手也升级了，几秒后自动重启（这几秒面板里暂时不能加规则）。' }
 } catch {
   Write-Host "更新失败：$($_.Exception.Message)" -ForegroundColor Red
   $code = 1

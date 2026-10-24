@@ -39,6 +39,7 @@ fi
 
 install -d -o root -g wheel -m 755 "$BIN_DIR" "$ETC_DIR" "$ETC_DIR/rules" "$ETC_DIR/panel"
 install -d -o root -g wheel -m 700 "$VAR_DIR"
+rm -f "$VAR_DIR/safe-mode.json" # 重新安装 = 重新启用（清掉之前的安全模式）
 install -o root -g wheel -m 755 "$SRC_BIN" "$BIN_DIR/sing-box"
 install -o root -g wheel -m 600 "$SRC/config.json" "$ETC_DIR/config.json"
 install -o root -g wheel -m 644 "$SRC"/rules/*.srs "$ETC_DIR/rules/"
@@ -75,6 +76,38 @@ launchctl bootstrap system "$PLIST"
 sleep 3
 launchctl print system/$LABEL | grep -E "state|pid" | head -3
 NAME=$NAME LABEL=$LABEL "$(dirname "$0")/helper-service.sh"
+
+# 断网保护：装完确认经 sing-box 能上网；不通而绕过它能通（是 sing-box 的问题），就撤回，电脑回到原来的网络
+probe() { [ "$(curl -skI -o /dev/null -m 6 --noproxy '*' -w '%{http_code}' "$@")" != 000 ]; }
+net_ok() { for u in https://www.taobao.com https://www.baidu.com https://www.qq.com; do probe "$u" && return 0; done; return 1; }
+direct_ok() {
+  local ifc; ifc=$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')
+  [ -n "$ifc" ] || return 1
+  for u in 'http://[2400:3200::1]/' 'http://[2402:4e00::]/' http://220.181.111.1/ http://110.242.68.66/; do probe --interface "$ifc" "$u" && return 0; done
+  return 1
+}
+ok=
+for _ in 1 2 3 4 5 6; do sleep 4; net_ok && { ok=1; break; }; done
+if [ -z "$ok" ] && direct_ok; then
+  launchctl bootout "system/$LABEL" 2>/dev/null || true
+  echo "装上后经 sing-box 上不了网（绕过它是通的），已自动撤回：sing-box 已停止，网络恢复原样。" >&2
+  echo "最后的日志：" >&2; tail -20 "$VAR_DIR/sing-box.log" >&2 || true
+  echo "常见原因：不在校园网（没有 IPv6，模式二连不上服务器），或别的代理软件还开着 TUN。" >&2
+  exit 1
+fi
+if [ -n "$ok" ]; then
+  echo "自检通过：经 sing-box 能正常上网。"
+  # 再等本地助手查一次免流服务器（模式二）：连不上时它会自动改走「不用服务器」
+  HP=$(/usr/bin/python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('traffic_port',9091))" "$ETC_DIR/panel/groups.json" 2>/dev/null || echo 9091)
+  for _ in $(seq 1 15); do
+    H=$(curl -s -m 3 "http://127.0.0.1:$HP/health" || true)
+    echo "$H" | grep -q '"server_checked": true' && break
+    sleep 3
+  done
+  echo "$H" | grep -q '"server_fallback": {' && echo "注意：当前网络连不上免流服务器，已自动改走「不用服务器」（经服务器的流量改为直连，IPv4 计费）。回到能连上服务器的网络后会自动切回。"
+else
+  echo "自检：网络本身不通（不是 sing-box 的问题），先不处理。"
+fi
 tail -5 "$VAR_DIR/sing-box.log" 2>/dev/null || true
 echo "已安装。面板 http://127.0.0.1:9090/ui"
 echo "以后改了订阅或设置：mac/update.sh（不用 sudo）；卸载：sudo $(dirname "$0")/uninstall.sh"

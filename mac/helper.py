@@ -16,10 +16,16 @@
 三、更新配置（/apply）：mac/update.sh 生成新配置后交给助手安装并重启 sing-box。助手本来就以 root 运行，
    所以只有第一次安装要 sudo，之后更新都不用。装之前先检查配置里的文件路径都在安装目录内，并用 sing-box check 验证。
 
+四、断网保护：sing-box 装上、更新后、运行中，只要「经 sing-box 上不了网、绕过它却能上」，就停掉 sing-box（安全模式），
+   电脑回到普通网络。安装与更新时不通会自动撤回；运行中每 30 秒检查一次，连续 3 次不通就暂停。
+   状态页 http://127.0.0.1:<端口>/ 可以看原因、重新启用；面板里也能手动暂停。
+   服务器单独看：当前网络连不上免流服务器（离开校园网、换了热点、服务器挂了）而网络本身是通的，
+   就把「免流服务器」自动切到「不用服务器」，经服务器的流量改为直连；每两分钟试一次，连上了自动切回。
+
 只监听 127.0.0.1。/rules 和 /apply 要带和 Clash API 相同的密钥；/rules 只接受面板页面的跨域请求，/apply 不接受任何网页的请求。
 用法：helper.py -c config.json -d 状态目录 [-p 9091] [-l 服务名]
 """
-import argparse, filecmp, glob, ipaddress, json, os, re, shutil, signal, subprocess, tempfile, threading, time, urllib.request
+import argparse, filecmp, glob, ipaddress, json, os, re, shutil, signal, subprocess, tempfile, threading, time, urllib.parse, urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -342,6 +348,231 @@ def collect():
         time.sleep(max(args.interval - (time.time() - t0), 0.1))
 
 
+# ---------- 断网保护 ----------
+# 经 sing-box 的探测：域名（走 TUN、sing-box 的 DNS 与分流）；绕过 sing-box 的探测：绑定物理网卡访问 IP（不经 DNS）。
+# 校园网 IPv4 拦了公共 DNS 的地址，所以绕过探测同时用 IPv6 和几个 IPv4 网站地址，任意一个有响应就算「网络本身是通的」
+TUN_PROBES = ["https://www.taobao.com", "https://www.baidu.com", "https://www.qq.com"]
+DIRECT_PROBES = ["http://[2400:3200::1]/", "http://[2402:4e00::]/", "http://220.181.111.1/", "http://110.242.68.66/"]
+SAFE_FILE = os.path.join(args.dir, "safe-mode.json")
+WATCH_INTERVAL, WATCH_FAILS = 30, 3
+
+
+def log(msg):
+    print(f"{datetime.now().isoformat(timespec='seconds')} {msg}", flush=True)
+
+
+def responds(url, iface=None):
+    cmd = ["/usr/bin/curl", "-skI", "-o", "/dev/null", "-m", "6", "--noproxy", "*", "-w", "%{http_code}", url]
+    if iface:
+        cmd[1:1] = ["--interface", iface]
+    try:
+        code = subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return code not in ("", "000")
+
+
+def physical_iface():
+    """默认路由所在的物理网卡（sing-box 只加 0/1、128/1 两条路由，默认路由还在物理网卡上）。"""
+    try:
+        out = subprocess.run(["/sbin/route", "-n", "get", "default"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"interface: (\S+)", out)
+    return m.group(1) if m and not m.group(1).startswith("utun") else None
+
+
+def net_state():
+    """ok：经 sing-box 能上网；broken：经 sing-box 不通、绕过它能通（sing-box 的问题）；offline：网络本身不通（不是 sing-box 的问题）。"""
+    if any(responds(u) for u in TUN_PROBES):
+        return "ok"
+    iface = physical_iface()
+    if iface and any(responds(u, iface) for u in DIRECT_PROBES):
+        return "broken"
+    return "offline"
+
+
+def wait_net(seconds=25):
+    """sing-box 刚启动时给它一点时间；期间一通就返回 ok。"""
+    end, st = time.time() + seconds, "broken"
+    while time.time() < end:
+        time.sleep(4)
+        st = net_state()
+        if st == "ok":
+            return st
+    return st
+
+
+def singbox_running():
+    if not args.label:
+        return False
+    r = subprocess.run(["launchctl", "print", f"system/{args.label}"], capture_output=True, text=True, timeout=10)
+    return "state = running" in r.stdout
+
+
+def safe_mode():
+    try:
+        with open(SAFE_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def enter_safe_mode(reason):
+    """停掉 sing-box（TUN 随之撤销，电脑回到普通网络），记下原因；重启电脑后也保持，直到手动重新启用或更新配置。"""
+    if args.label:
+        subprocess.run(["launchctl", "bootout", f"system/{args.label}"], capture_output=True, timeout=60)
+    with open(SAFE_FILE, "w") as f:
+        json.dump({"since": datetime.now().isoformat(timespec="seconds"), "reason": reason}, f, ensure_ascii=False)
+    log(f"进入安全模式：{reason}")
+
+
+def leave_safe_mode():
+    if os.path.exists(SAFE_FILE):
+        os.unlink(SAFE_FILE)
+    if args.label and not singbox_running():
+        subprocess.run(["launchctl", "bootstrap", "system", f"/Library/LaunchDaemons/{args.label}.plist"], capture_output=True, timeout=60)
+
+
+def resume():
+    """重新启用：启动 sing-box 并确认能上网，不行就退回安全模式。"""
+    leave_safe_mode()
+    st = wait_net()
+    if st == "broken":
+        enter_safe_mode("重新启用后经 sing-box 仍然上不了网")
+        raise BadConfig("重新启用后经 sing-box 仍然上不了网，已再次暂停。看 sing-box.log；离开校园网时先在面板里选「不用服务器」")
+    log("已重新启用")
+    if st == "ok":
+        server_check(quick=True)
+    return {"ok": True, "net": st, "server_fallback": server_fallback()}
+
+
+# ---------- 服务器连不上时自动改走「不用服务器」 ----------
+ENTRY_OFF = "不用服务器（离校时选）"  # 与 lib/groups.js 一致
+FALLBACK_FILE = os.path.join(args.dir, "server-fallback.json")
+DELAY_URL = "https://www.gstatic.com/generate_204"
+
+
+def clash(method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(API + path, data=data, method=method,
+                                 headers={"Authorization": "Bearer " + SECRET, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=12) as r:
+        raw = r.read()
+        return json.loads(raw) if raw else None
+
+
+def entry_now():
+    try:
+        return clash("GET", "/proxies/" + urllib.parse.quote(ENTRY)).get("now")
+    except Exception:
+        return None
+
+
+def reachable_via(name):
+    """经某个出口（服务器入口、自动选最快、或「免流服务器」当前的选择）能不能打开网页：sing-box 自己测，不经 TUN。"""
+    try:
+        q = urllib.parse.quote(DELAY_URL, safe="")
+        r = clash("GET", f"/proxies/{urllib.parse.quote(name)}/delay?timeout=6000&url={q}")
+        return bool(r and r.get("delay"))
+    except Exception:
+        return False
+
+
+def internet_ok():
+    """绕过 sing-box，网络本身通不通。"""
+    iface = physical_iface()
+    return bool(iface) and any(responds(u, iface) for u in DIRECT_PROBES)
+
+
+def server_fallback():
+    try:
+        with open(FALLBACK_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def fall_back(previous, reason):
+    clash("PUT", "/proxies/" + urllib.parse.quote(ENTRY), {"name": ENTRY_OFF})
+    with open(FALLBACK_FILE, "w") as f:
+        json.dump({"previous": previous, "since": datetime.now().isoformat(timespec="seconds"), "reason": reason}, f, ensure_ascii=False)
+    log(f"免流服务器连不上，已自动改走「{ENTRY_OFF}」（原来是「{previous}」）：{reason}")
+
+
+guard_state = {"fails": 0, "oks": 0, "last_retry": 0.0, "checked": False}
+
+
+def server_check(quick=False):
+    """模式二才有「免流服务器」。quick：安装 / 更新 / 重新启用后立刻判断（连续 2 次连不上就切），平时要连续 3 次。"""
+    guard_state["checked"] = True
+    if ENTRY not in OUT:
+        return
+    now = entry_now()
+    if now is None:
+        return
+    fb = server_fallback()
+    if fb:
+        if now != ENTRY_OFF:  # 用户自己在面板里改了选择：交还给用户
+            os.unlink(FALLBACK_FILE)
+            log("「免流服务器」已被手动改选，不再自动切换")
+            return
+        if time.time() - guard_state["last_retry"] < 120:
+            return
+        guard_state["last_retry"] = time.time()
+        if reachable_via(fb["previous"]):
+            guard_state["oks"] += 1
+            if guard_state["oks"] >= 2:
+                clash("PUT", "/proxies/" + urllib.parse.quote(ENTRY), {"name": fb["previous"]})
+                os.unlink(FALLBACK_FILE)
+                guard_state["oks"] = 0
+                log(f"免流服务器又能连上了，已切回「{fb['previous']}」")
+        else:
+            guard_state["oks"] = 0
+        return
+    if now == ENTRY_OFF:  # 用户自己选的「不用服务器」
+        guard_state["fails"] = 0
+        return
+    tries = 2 if quick else 1
+    for i in range(tries):
+        if reachable_via(ENTRY):
+            guard_state["fails"] = 0
+            return
+        if i + 1 < tries:
+            time.sleep(4)
+    if not internet_ok():  # 网络本身不通，不是服务器的问题
+        guard_state["fails"] = 0
+        return
+    guard_state["fails"] += 1
+    log(f"连不上免流服务器「{now}」（第 {guard_state['fails']} 次）")
+    if quick or guard_state["fails"] >= WATCH_FAILS:
+        guard_state["fails"] = 0
+        fall_back(now, "当前网络连不上免流服务器（离开了校园网、换了网络，或服务器挂了）")
+
+
+def watchdog():
+    fails, first = 0, True
+    time.sleep(20)  # 等 sing-box 启动好
+    while True:
+        try:
+            if safe_mode() or apply_lock.locked() or not singbox_running():
+                fails = 0
+            else:
+                st = net_state()
+                fails = fails + 1 if st == "broken" else 0
+                if fails:
+                    log(f"经 sing-box 上不了网，绕过它能上（第 {fails} 次）")
+                if fails >= WATCH_FAILS:
+                    enter_safe_mode(f"连续 {WATCH_FAILS} 次检查经 sing-box 上不了网、绕过它能上（配置或 sing-box 本身有问题）")
+                    fails = 0
+                elif st == "ok":
+                    server_check(quick=first)  # 刚启动时立刻判断一次服务器，免得连不上时干等一分多钟
+                    first = False
+        except Exception as e:  # 看门狗自己不能挂
+            log(f"看门狗出错：{e}")
+        time.sleep(WATCH_INTERVAL)
+
+
 # ---------- 更新配置（/apply）----------
 class BadConfig(ValueError):
     pass
@@ -427,10 +658,24 @@ def apply_update(src):
         if r.returncode != 0:
             os.unlink(staged)
             raise BadConfig("sing-box 检查没通过，旧配置没动：" + (r.stderr or r.stdout).strip()[-800:])
+        backup = CONFIG + ".prev"
+        shutil.copyfile(CONFIG, backup)
         os.replace(staged, CONFIG)
         restarted = bool(args.label)
         if restarted:
-            subprocess.run(["launchctl", "kickstart", "-k", f"system/{args.label}"], timeout=60, check=False)
+            if safe_mode():
+                leave_safe_mode()  # 更新配置 = 重新启用
+            else:
+                subprocess.run(["launchctl", "kickstart", "-k", f"system/{args.label}"], timeout=60, check=False)
+            if wait_net() == "broken":
+                os.replace(backup, CONFIG)
+                subprocess.run(["launchctl", "kickstart", "-k", f"system/{args.label}"], timeout=60, check=False)
+                st = wait_net()
+                if st == "broken":
+                    enter_safe_mode("新配置和旧配置经 sing-box 都上不了网")
+                log("新配置装上后经 sing-box 上不了网，已换回旧配置")
+                raise BadConfig("新配置装上后经 sing-box 上不了网，已自动换回旧配置" + ("" if st != "broken" else "；旧配置也不通，已暂停 sing-box（安全模式）")
+                                + "。看 sing-box.log；离开校园网时先在面板里选「不用服务器」")
         reload()
         if TARGETS:
             with rules_lock:
@@ -440,7 +685,30 @@ def apply_update(src):
         if helper_updated:
             install_file(new_helper, os.path.join(BIN_DIR, "helper.py"), 0o755)
             threading.Timer(1.0, stop).start()  # 退出后 launchd 会拉起新版助手
-    return {"ok": True, "restarted": restarted, "helper_updated": helper_updated}
+        if restarted:
+            server_check(quick=True)
+    return {"ok": True, "restarted": restarted, "helper_updated": helper_updated, "server_fallback": server_fallback()}
+
+
+# sing-box 停掉时面板（由 sing-box 提供）打不开，助手自己给一个最简单的状态页
+STATUS_PAGE = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>校园网 v6 免流 · 状态</title><style>body{font:15px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;max-width:620px;margin:40px auto;padding:0 16px;color:#1c2027}
+.card{border:1px solid #e1e4ea;border-radius:12px;padding:16px 18px;margin:12px 0}.ok{color:#157f3b}.warn{color:#b45309}button{padding:6px 14px;border-radius:8px;border:1px solid #2457d6;background:#2457d6;color:#fff;cursor:pointer}
+input{padding:6px 10px;border:1px solid #e1e4ea;border-radius:8px}.muted{color:#646b78;font-size:13px}</style></head><body>
+<h2>校园网 v6 免流 · 状态</h2><div class="card" id="st">读取中……</div>
+<div class="card"><input type="password" id="sec" placeholder="面板密钥"> <button id="go"></button><p class="muted" id="msg"></p></div>
+<p class="muted">面板：<a href="http://127.0.0.1:9090/ui">http://127.0.0.1:9090/ui</a>（sing-box 运行时才能打开）</p>
+<script>
+const $=(i)=>document.getElementById(i);let h=null;try{$("sec").value=localStorage.getItem("neu-secret")||""}catch{}
+async function load(){h=await (await fetch("/health",{cache:"no-store"})).json();
+$("st").innerHTML=h.safe_mode?`<b class="warn">已暂停（安全模式）</b>：电脑现在走普通网络。<br>原因：${h.safe_mode.reason}<br><span class="muted">${h.safe_mode.since.replace("T"," ")} 起</span>`
+:(h.singbox?'<b class="ok">运行中</b>：sing-box 正常接管网络。'+(h.server_fallback?`<br><span class="warn">连不上免流服务器，已自动改走「不用服务器」（原来是「${h.server_fallback.previous}」，${String(h.server_fallback.since).replace("T"," ")} 起）；能连上后自动切回。</span>`:''):'<b class="warn">sing-box 没有运行</b>');
+$("go").textContent=h.safe_mode||!h.singbox?"重新启用":"暂停（回到普通网络）";}
+$("go").onclick=async()=>{const s=$("sec").value.trim();try{localStorage.setItem("neu-secret",s)}catch{}
+$("msg").textContent="处理中……（重新启用要等十几秒确认能上网）";
+const r=await fetch(h.safe_mode||!h.singbox?"/resume":"/pause",{method:"POST",headers:{Authorization:"Bearer "+s}});
+const d=await r.json().catch(()=>({}));$("msg").textContent=r.ok?"完成":(d.error||("失败 "+r.status));load();};
+load();</script></body></html>"""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -454,15 +722,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def cors(self):
         origin = self.headers.get("Origin", "")
-        if origin in PANEL_ORIGINS:
+        if origin in PANEL_ORIGINS:  # 状态页和助手同源，不需要跨域头
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT")
 
-    def authorized(self):
-        # 浏览器里别的网站也能向 127.0.0.1 发请求：要求密钥，并且只认面板页面
+    def authorized(self, own_page=False):
+        # 浏览器里别的网站也能向 127.0.0.1 发请求：要求密钥，并且只认面板页面（暂停 / 重新启用还认助手自己的状态页）
         origin = self.headers.get("Origin")
-        if origin and origin not in PANEL_ORIGINS:
+        own = {f"http://127.0.0.1:{args.port}", f"http://localhost:{args.port}"} if own_page else set()
+        if origin and origin not in PANEL_ORIGINS | own:
             return False
         return not SECRET or self.headers.get("Authorization") == "Bearer " + SECRET
 
@@ -485,7 +754,15 @@ class Handler(BaseHTTPRequestHandler):
             with rules_lock:
                 self.reply(200, rules_view(load_rules()))
         elif path == "/health":
-            self.reply(200, {"ok": True, "rules": bool(TARGETS), "traffic": True, "apply": True})
+            self.reply(200, {"ok": True, "rules": bool(TARGETS), "traffic": True, "apply": True,
+                             "singbox": singbox_running(), "safe_mode": safe_mode(), "server_fallback": server_fallback(),
+                             "server_checked": guard_state["checked"]})
+        elif path == "/":
+            body = STATUS_PAGE.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self.send_error(404)
 
@@ -517,6 +794,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(400, {"error": str(e)})
             except (ValueError, OSError, subprocess.SubprocessError) as e:
                 self.reply(500, {"error": f"更新失败：{e}"})
+        elif path in ("/pause", "/resume"):
+            if not self.authorized(own_page=True):
+                return self.reply(401, {"error": "密钥不对"})
+            try:
+                if path == "/pause":
+                    enter_safe_mode("手动暂停")
+                    self.reply(200, {"ok": True})
+                else:
+                    self.reply(200, resume())
+            except BadConfig as e:
+                self.reply(400, {"error": str(e)})
         elif path == "/rules":
             self.change("add")
         elif path == "/rules/delete":
@@ -545,5 +833,11 @@ os.makedirs(args.dir, exist_ok=True)
 if TARGETS:
     with rules_lock:
         apply_rules(load_rules())  # 启动时按 user-rules.json 重写一遍规则文件（升级后新增的目标也会有文件）
+if safe_mode() and singbox_running():
+    # 开机时 launchd 会照常启动 sing-box；还在安全模式就再停掉，直到手动重新启用或更新配置
+    subprocess.run(["launchctl", "bootout", f"system/{args.label}"], capture_output=True, timeout=60)
+    log("安全模式：保持 sing-box 停止")
 threading.Thread(target=collect, daemon=True).start()
+if args.label:
+    threading.Thread(target=watchdog, daemon=True).start()
 ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()

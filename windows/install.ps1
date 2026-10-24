@@ -9,6 +9,59 @@ param([string]$SingBox = '', [switch]$NoPause)
 $ErrorActionPreference = 'Stop'
 $src = $PSScriptRoot
 
+# 断网检查（和本地助手的看门狗相同）：经 sing-box 的探测用域名，绕过它的探测绑定物理网卡的地址访问 IP
+function Responds([string]$url, [string]$bind) {
+  $a = @('-skI', '-o', 'NUL', '-m', '6', '--noproxy', '*', '-w', '%{http_code}')
+  if ($bind) { $a += @('--interface', $bind) }
+  $code = & curl.exe @a $url 2>$null
+  return ([bool]$code -and $code -ne '000')
+}
+function NetState() {
+  foreach ($u in 'https://www.taobao.com', 'https://www.baidu.com', 'https://www.qq.com') { if (Responds $u '') { return 'ok' } }
+  $cfgs = @(Get-NetIPConfiguration -ErrorAction SilentlyContinue | Where-Object {
+    ($_.IPv4DefaultGateway -or $_.IPv6DefaultGateway) -and $_.InterfaceAlias -ne 'neu-v6' -and
+    $_.InterfaceAlias -notmatch 'vEthernet|Radmin|Teredo' -and
+    $_.NetAdapter.InterfaceDescription -notmatch 'Wintun|TAP-Windows|Tailscale|WireGuard|Clash|Meta|Radmin|Hyper-V|VMware|VirtualBox|ZeroTier' })
+  foreach ($ip in @($cfgs | ForEach-Object { $_.IPv6Address.IPAddress } | Where-Object { $_ -like '2*' })) {
+    foreach ($u in 'http://[2400:3200::1]/', 'http://[2402:4e00::]/') { if (Responds $u $ip) { return 'broken' } }
+  }
+  foreach ($ip in @($cfgs | ForEach-Object { $_.IPv4Address.IPAddress } | Where-Object { $_ })) {
+    foreach ($u in 'http://220.181.111.1/', 'http://110.242.68.66/') { if (Responds $u $ip) { return 'broken' } }
+  }
+  return 'offline'
+}
+
+# 请本地助手暂停：它和 sing-box 都在 SYSTEM 的会话里，能让 sing-box 正常退出（撤掉 TUN 网卡）并恢复 WeakHostSend。
+# 本脚本在用户会话里，连不上 sing-box 的控制台，自己只能强杀（强杀后紧接着再启动常常打不开 TUN）
+function PauseHelper([string]$cfgFile, [string]$groupsFile) {
+  try {
+    $c = [IO.File]::ReadAllText($cfgFile) | ConvertFrom-Json
+    $p = 9091
+    try { $p = [int](([IO.File]::ReadAllText($groupsFile) | ConvertFrom-Json).traffic_port) } catch { }
+    Invoke-RestMethod -Uri "http://127.0.0.1:$p/pause" -Method Post -Body '{}' -ContentType 'application/json' `
+      -Headers @{ Authorization = "Bearer $($c.experimental.clash_api.secret)" } -TimeoutSec 30 | Out-Null
+  } catch { }
+}
+
+# 停掉还在运行的 sing-box：先试着让它自己退出，10 秒没退再强杀（同 helper.ps1 的 StopProcess）
+function StopSingBox([string]$exe) {
+  foreach ($p in @(Get-Process -Name 'sing-box' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })) {
+    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$src\helper.ps1`" -SendCtrlC $($p.Id)" -WindowStyle Hidden -Wait
+    if (-not $p.WaitForExit(10000)) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+  }
+}
+
+# 恢复本地助手暂时关掉的 WeakHostSend（见 helper.ps1 的 FixWeakHost）
+function RestoreWeakHost([string]$file) {
+  if (-not (Test-Path $file)) { return }
+  foreach ($p in ([IO.File]::ReadAllText($file) | ConvertFrom-Json).PSObject.Properties) {
+    $guid, $family = $p.Name.Split('|')
+    $a = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceGuid -eq $guid })[0]
+    if ($a) { Set-NetIPInterface -InterfaceIndex $a.ifIndex -AddressFamily $family -WeakHostSend $p.Value -ErrorAction SilentlyContinue }
+  }
+  Remove-Item $file -Force
+}
+
 function Done($code) {
   if (-not $NoPause) { Read-Host '按回车关闭' | Out-Null }
   exit $code
@@ -43,8 +96,10 @@ try {
 
   # 已经装过：先停掉自己的助手和 sing-box（助手稍后会带着 sing-box 一起重启）
   $task = 'neu-v6-free helper'
+  if (Test-Path (Join-Path $dir 'config.json')) { PauseHelper (Join-Path $dir 'config.json') (Join-Path $dir 'panel\groups.json') }
   if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue }
-  Get-Process -Name 'sing-box' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Join-Path $dir 'sing-box.exe') } | Stop-Process -Force
+  StopSingBox (Join-Path $dir 'sing-box.exe')
+  RestoreWeakHost (Join-Path $dir 'weakhost.json')
   Start-Sleep -Seconds 1
   # 别的代理软件占着端口时 sing-box 起不来
   $ports = @(@($cfg.inbounds) | Where-Object { $_.listen_port } | ForEach-Object { [int]$_.listen_port }) + [int]($cfg.experimental.clash_api.external_controller -split ':')[-1]
@@ -53,6 +108,27 @@ try {
   if ($busy.Count) { throw "端口被占用：$($busy -join '、')。先退出 v2rayN、Clash 等其他代理软件（包括它们的 TUN 模式），再运行一次" }
 
   New-Item -ItemType Directory -Force -Path $dir, $panelDir, $rulesDir, (Join-Path $dir 'data') | Out-Null
+  Remove-Item (Join-Path $dir 'safe-mode.json') -Force -ErrorAction SilentlyContinue  # 重新安装 = 重新启用
+  # 别的代理软件退出后常留下系统代理：指向的端口已经没有程序在听，浏览器就「没网」。这种失效的系统代理直接关掉
+  $inet = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+  $ie = Get-ItemProperty $inet
+  if ($ie.ProxyEnable -eq 1 -and $ie.ProxyServer) {
+    $pp = [int](([string]$ie.ProxyServer -split '[:;=]')[-1])
+    if (-not (Get-NetTCPConnection -State Listen -LocalPort $pp -ErrorAction SilentlyContinue)) {
+      Set-ItemProperty $inet -Name ProxyEnable -Value 0
+      Write-Host "系统代理 $($ie.ProxyServer) 已经没有程序在用（多半是退出的代理软件留下的），已关闭。" -ForegroundColor Yellow
+    } else {
+      Write-Host "注意：系统代理设成了 $($ie.ProxyServer)，那个程序还在运行。本工具用 TUN 接管全部流量，不需要系统代理。" -ForegroundColor Yellow
+    }
+  }
+  # 代理环境变量不替你改，只提醒：它指向的软件关掉后，用这个变量的程序（命令行工具、Claude Code 等）会连不上
+  foreach ($n in 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY') {
+    foreach ($scope in 'User', 'Machine') {
+      $v = [Environment]::GetEnvironmentVariable($n, $scope)
+      if ($v) { Write-Host "注意：环境变量 $n（$scope）= $($v -replace '//[^/@]+@', '//***@')。如果它指向的代理软件已经关掉，请删掉这个变量，否则用它的程序会连不上。" -ForegroundColor Yellow }
+    }
+  }
+
   # sing-box.exe
   $sbDest = Join-Path $dir 'sing-box.exe'
   if (-not $SingBox -and (Test-Path (Join-Path $src 'sing-box.exe'))) { $SingBox = Join-Path $src 'sing-box.exe' }
@@ -79,7 +155,7 @@ try {
   $same = (& $full $src) -eq $dir
   if (-not $same) {
     Copy-Item (Join-Path $src 'panel\*') $panelDir -Force
-    foreach ($f in 'helper.ps1', 'update.ps1', 'uninstall.ps1') { Copy-Item (Join-Path $src $f) $dir -Force }
+    foreach ($f in 'helper.ps1', 'update.ps1', 'uninstall.ps1', 'uninstall.bat') { if (Test-Path (Join-Path $src $f)) { Copy-Item (Join-Path $src $f) $dir -Force } }
     if (Test-Path (Join-Path $src 'rules')) {
       if (Test-Path (Join-Path $src 'rules\*.srs')) { Copy-Item (Join-Path $src 'rules\*.srs') $rulesDir -Force }
       foreach ($f in Get-ChildItem (Join-Path $src 'rules') -Filter 'user-*.json') {  # 「我的规则」只补缺的
@@ -114,14 +190,48 @@ try {
 
   $port = 9091
   try { $port = [int](([IO.File]::ReadAllText((Join-Path $panelDir 'groups.json'), $utf8) | ConvertFrom-Json).traffic_port) } catch { }
+  # 等 TUN 网卡真的起来（只看进程在不在不够：打开 TUN 卡住时进程还在，网络照常直连，自检会误以为通过）
   $h = $null
-  for ($i = 0; $i -lt 20 -and -not ($h -and $h.singbox); $i++) {
+  for ($i = 0; $i -lt 64 -and -not ($h -and $h.tun); $i++) {
     Start-Sleep -Milliseconds 700
     try { $h = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 2 } catch { }
   }
-  if ($h -and $h.singbox) { Write-Host '安装完成：sing-box 和本地助手都在运行，开机自动启动。' -ForegroundColor Green }
-  elseif ($h) { Write-Host "本地助手在运行，但 sing-box 没起来：看 $dir\sing-box.log" -ForegroundColor Yellow }
-  else { Write-Host "本地助手没有响应：看 $dir\helper.log" -ForegroundColor Yellow }
+  # 断网保护：装完确认经 sing-box 能上网；不通就撤回，电脑回到原来的网络。
+  # 「绕过它」的探测不一定可靠（例如 WeakHostSend 打开时绑定物理网卡的包照样进 TUN），所以不通时一律先撤回，再测一次判断原因
+  $st = 'broken'
+  if ($h -and $h.tun) {
+    for ($i = 0; $i -lt 6; $i++) { Start-Sleep -Seconds 4; $st = NetState; if ($st -eq 'ok') { break } }
+  }
+  if ($st -ne 'ok') {
+    PauseHelper $cfgPath (Join-Path $panelDir 'groups.json')
+    Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+    Disable-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue | Out-Null
+    StopSingBox $sbDest
+    RestoreWeakHost (Join-Path $dir 'weakhost.json')
+    $without = $false
+    for ($i = 0; $i -lt 3 -and -not $without; $i++) { Start-Sleep -Seconds 3; $without = (NetState) -eq 'ok' }
+    Remove-Item (Join-Path $dir 'safe-mode.json') -Force -ErrorAction SilentlyContinue  # 上面的暂停留下的；下次安装重新开始
+    if (-not ($h -and $h.tun)) { Write-Host 'sing-box 没起来（或者 TUN 网卡没打开），已自动撤回：开机不再启动，网络恢复原样。' -ForegroundColor Red }
+    elseif ($without) {
+      Write-Host '装上后经 sing-box 上不了网，停掉它就能上：已自动撤回（sing-box 已停止、开机不再启动），网络恢复原样。' -ForegroundColor Red
+      Write-Host '常见原因：不在校园网（没有 IPv6，模式二连不上服务器），或别的代理软件还开着 TUN。'
+    } else {
+      Write-Host '现在网络本身不通（停掉 sing-box 也上不了网），没法自检，已先撤回。联网以后再运行一次 install.bat。' -ForegroundColor Yellow
+    }
+    Write-Host '最后的日志：'
+    Get-Content (Join-Path $dir 'sing-box.log') -Tail 20 -Encoding UTF8 -ErrorAction SilentlyContinue
+    Get-Content (Join-Path $dir 'helper.log') -Tail 10 -Encoding UTF8 -ErrorAction SilentlyContinue
+    Done 1
+  }
+  Write-Host '安装完成：自检通过，经 sing-box 能正常上网；开机自动启动。' -ForegroundColor Green
+  # 再等本地助手查一次免流服务器（模式二）：连不上时它会自动改走「不用服务器」
+  for ($i = 0; $i -lt 15; $i++) {
+    try { $h = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 3 } catch { }
+    if ($h.server_checked) { break }
+    Start-Sleep -Seconds 3
+  }
+  if ($h.server_fallback) { Write-Host "注意：当前网络连不上免流服务器，已自动改走「不用服务器」（经服务器的流量改为直连，IPv4 计费）。回到能连上服务器的网络后会自动切回。" -ForegroundColor Yellow }
+  Write-Host '万一以后上不了网：本地助手会自动暂停 sing-box；也可以打开 http://127.0.0.1:9091/ 手动暂停或重新启用。' 
   Write-Host ''
   Write-Host '面板：http://127.0.0.1:9090/ui （密钥是生成配置时的 clash_api_secret）' -ForegroundColor Cyan
   Write-Host '以后改了订阅或设置：重新生成，然后运行新生成目录里的 update.ps1（不需要管理员）。'

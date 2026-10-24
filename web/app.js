@@ -112,7 +112,7 @@ async function getPanelHtml() {
 }
 
 // Windows 脚本按字节取：它们带 UTF-8 BOM（Windows 自带的 PowerShell 5.1 靠它识别中文），按文本读会丢掉
-const WINDOWS_SCRIPTS = ["install.ps1", "update.ps1", "uninstall.ps1", "helper.ps1"];
+const WINDOWS_SCRIPTS = ["install.ps1", "update.ps1", "uninstall.ps1", "helper.ps1", "install.bat", "update.bat", "uninstall.bat"];
 let windowsScripts = null;
 
 // 规则集从 GitHub 下载（raw.githubusercontent.com 允许跨域），装进 zip 的 rules/

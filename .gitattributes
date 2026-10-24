@@ -1,0 +1,2 @@
+# Windows 的 cmd 只认 CRLF 换行
+*.bat text eol=crlf

@@ -28,7 +28,8 @@ case "$CODE" in
 import json, sys
 r = json.load(open(sys.argv[1]))
 print('已更新并重启服务' if r.get('restarted') else '已更新')
-if r.get('helper_updated'): print('本地助手也升级了，几秒后自动重启')" "$RESP"
+if r.get('helper_updated'): print('本地助手也升级了，几秒后自动重启')
+if r.get('server_fallback'): print('注意：当前网络连不上免流服务器，已自动改走「不用服务器」；能连上后会自动切回')" "$RESP"
     exit 0 ;;
   400|500)
     echo "更新失败：$(/usr/bin/python3 -c "import json, sys; print(json.load(open(sys.argv[1])).get('error'))" "$RESP")" >&2

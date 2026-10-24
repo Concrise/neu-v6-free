@@ -66,6 +66,13 @@ sudo mac/install.sh       # 只有这一次要 sudo
 - **规则集更新**：规则集（哪些网站算国内、哪些算 AI……）在每次 `mac/update.sh` 时下载最新版。隔一两个月运行一次即可。
 - **离开校园网**：面板里「免流服务器」选「不用服务器（离校时选）」。
 
+## 断网保护
+
+- 安装和 `mac/update.sh` 都会自检：装上后经 sing-box 上不了网（绕过它能上），安装会自动撤回，更新会换回旧配置。
+- 本地助手每 30 秒检查一次，连续 3 次不通就暂停 sing-box（安全模式），电脑回到普通网络。
+- 状态页 `http://127.0.0.1:9091/`：看原因、输入面板密钥后暂停或重新启用。面板「概览」里也有「暂停」按钮。
+- 安全模式重启后也保持，直到重新启用、`mac/update.sh` 或重新安装。
+
 ## 卸载
 
 ```bash
@@ -90,7 +97,7 @@ sudo mac/uninstall.sh --purge    # 全部删除
 | 面板提示「连不上本地助手」 | `curl http://127.0.0.1:9091/health`；日志 `/usr/local/var/neu-v6-free/helper.log`；`sudo mac/helper-service.sh` 重装助手 |
 | `mac/update.sh` 说 sing-box 检查没通过 | 错误信息里有具体是哪一项；旧配置没动，修好设置再运行 |
 | 某个网站打不开 | 面板「实时连接」搜索它，看实际出口；点「改规则」换一个 |
-| 想暂时关掉 | `sudo launchctl bootout system/local.neu-v6-free`；恢复：`sudo launchctl bootstrap system /Library/LaunchDaemons/local.neu-v6-free.plist` |
+| 想暂时关掉 | 面板「概览」→「暂停」，或打开 `http://127.0.0.1:9091/` 点「暂停」；在那里重新启用 |
 
 ## 不装后台服务：用 sing-box 官方 App
 

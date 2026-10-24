@@ -264,9 +264,24 @@ function renderHome() {
     ? "校园网 IPv6 免费、IPv4 计费。有 IPv6 的国内网站直接走 v6；没有 IPv6 的，经你自己的服务器转一下（v6 进、v4 出），也免费。"
     : "校园网 IPv6 免费、IPv4 计费。这份配置让能走 v6 的流量都走 v6；只有 IPv4 的国内网站照常 v4 直连（计费）。"}</p></div>`));
 
+  if (helper.server_fallback) {
+    m.append($(`<div class="note warn"><b>当前网络连不上免流服务器</b>，已在 ${esc(String(helper.server_fallback.since).replace("T", " "))} 自动改走「不用服务器」：
+      经服务器的流量改为直连（IPv4 计费）。原来选的是「${esc(helper.server_fallback.previous)}」，能连上后会自动切回；手动改选「免流服务器」则不再自动切换。</div>`));
+  }
   const cards = $(`<div class="cards"></div>`);
   const card = (k, v, s) => cards.append($(`<div class="card stat"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`));
-  card("运行状态", `<span class="badge b-free">运行中</span>`, esc(version || "sing-box"));
+  const runCard = $(`<div class="card stat"><div class="k">运行状态</div><div class="v"><span class="badge b-free">运行中</span></div>
+    <div class="s">${esc(version || "sing-box")}</div></div>`);
+  if (helper.ok && helper.error !== "old") {
+    // 暂停 = 停掉 sing-box，电脑回到普通网络；面板也会跟着打不开，去本地助手的状态页重新启用
+    const pause = $(`<button class="btn small" style="margin-top:6px">暂停（回到普通网络）</button>`);
+    pause.onclick = async () => {
+      if (!confirm("暂停后 sing-box 停止，电脑回到普通网络（v4 计费）。面板会打不开，之后在 " + helperBase() + "/ 重新启用。确定？")) return;
+      try { await helperApi("/pause", { method: "POST" }); location.href = helperBase() + "/"; } catch (e) { toast("暂停失败：" + e.message); }
+    };
+    runCard.append(pause);
+  }
+  cards.append(runCard);
   card("模式", tunnel ? "模式二" : "模式一", tunnel ? "自带双栈服务器：只有 v4 的流量也能免费" : "不用服务器：只省有 v6 的那部分");
   const helperState = !helper.ok ? `<span class="badge b-paid">未连接</span>` : helper.rules ? `<span class="badge b-free">正常</span>` : `<span class="badge b-paid">需要更新</span>`;
   card("本地助手", helperState, helper.rules ? "「我的规则」可用" : `<a href="#/rules">看怎么开启</a>`);
@@ -420,7 +435,7 @@ function targetSelect(value) {
 const targetDesc = (id) => (meta.user_targets || []).find((t) => t.id === id)?.desc || "";
 
 function helperHelp() {
-  if (meta.platform === "windows") return "在生成的 Windows 文件夹里右键 install.ps1 →「使用 PowerShell 运行」重新安装一次；助手的日志在 C:\\neu-v6-free\\helper.log。";
+  if (meta.platform === "windows") return "双击生成的 Windows 文件夹里的 update.bat（会顺便升级本地助手），不行就双击 install.bat 重新安装一次；助手的日志在 C:\\neu-v6-free\\helper.log。";
   if (meta.platform === "mac") return "重新运行一次更新脚本（mac/update.sh，或自用配置里的 ./update.sh）就会装上，或单独运行 sudo mac/helper-service.sh。";
   return "这个平台没有本地助手：在配置文件里写 custom_rules，重新生成后导入。";
 }
@@ -703,7 +718,7 @@ function renderTraffic() {
   m.append($(`<div><h1>流量统计</h1><p class="lead">按每条连接的实际出口记账，每秒更新，只统计这台电脑。
     <b>省下的</b> = 本来要走校园网 IPv4 计费、现在免费走掉的流量（上下行合计）。</p></div>`));
   if (!helper.traffic) {
-    m.append($(`<div class="note warn">${meta.platform === "windows" ? "Windows 版暂时没有流量统计。" : `连不上本地助手。${esc(helperHelp())}`}</div>`));
+    m.append($(`<div class="note warn">${helper.ok ? "本地助手是旧版，没有流量统计；" : "连不上本地助手。"}${esc(helperHelp())}</div>`));
     return;
   }
   const box = $(`<div></div>`);
@@ -772,6 +787,7 @@ function renderHelp() {
     ["什么时候需要重新生成配置？", "只有换了订阅、服务器，或改了设置文件（config.yaml）时：重新生成后运行更新脚本（macOS 是 mac/update.sh，Windows 是 update.ps1），不需要管理员密码。切换分组、加规则都是即时生效的。"],
     ...(tunnel ? [["离开校园网（没有 IPv6）怎么办？", `在「免流服务器」里选「${ENTRY_OFF}」，所有经服务器的流量改为直连。`],
       ["服务器流量快用完了", "在「免流服务器」里换一台服务器；YouTube、Steam 这类大流量的分组可以临时改成「直连（v6 优先）」。"]] : []),
+    ["装了以后上不了网怎么办？", "不会一直断：本地助手每 30 秒检查一次，「经 sing-box 上不了网、绕过它能上」连续 3 次就自动暂停 sing-box，电脑回到普通网络。也可以在「概览」点「暂停」，或打开 http://127.0.0.1:9091/ 暂停 / 重新启用。"],
     ["密钥在哪？", "生成配置时设置的 clash_api_secret（在 config.yaml 里；网页生成器下载时会显示）。"],
   ];
   m.append($(`<div class="card">${qa.map(([q, a]) => `<p><b>${esc(q)}</b><br><span class="muted">${esc(a)}</span></p>`).join("")}</div>`));

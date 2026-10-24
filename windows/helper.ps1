@@ -1,16 +1,42 @@
-﻿# 本地助手（Windows）：开机以 SYSTEM 身份运行（install.ps1 注册的计划任务「neu-v6-free helper」），负责三件事：
+﻿# 本地助手（Windows）：开机以 SYSTEM 身份运行（install.ps1 注册的计划任务「neu-v6-free helper」），负责这几件事：
 #   1. 运行 sing-box：启动安装目录里的 sing-box.exe，退出了就重新拉起。
 #   2. 我的规则（/rules）：面板里加的规则写进 rules\user-<目标>.json，sing-box 发现文件变了会自动重新加载。
 #      全部规则另存一份在 rules\user-rules.json（面板显示顺序、备注都在这里）。
 #   3. 更新配置（/apply）：update.ps1 把新生成的配置交给它，检查通过后替换并重启 sing-box。
 #      助手本来就有管理员权限，所以只有第一次安装要点「是」，之后更新都不用。
+#   4. 断网保护：只要「经 sing-box 上不了网、绕过它却能上」，就停掉 sing-box（安全模式），电脑回到普通网络。
+#      更新后不通自动换回旧配置；运行中每 30 秒检查一次，连续 3 次不通就暂停；sing-box 反复崩溃也会暂停。
+#      状态页 http://127.0.0.1:<端口>/ 可以看原因、重新启用；面板里也能手动暂停。
+#      服务器单独看：当前网络连不上免流服务器而网络本身是通的，就把「免流服务器」自动切到「不用服务器」，
+#      每两分钟试一次，连上了自动切回。
+#   5. 物理网卡的 WeakHostSend：sing-box 运行期间关掉（见 FixWeakHost），停止时恢复。
+#   6. 流量统计（/traffic）：和 mac/helper.py 相同的记账方式，存在 traffic.json（见「流量统计」一节）。
 # 只监听 127.0.0.1；/rules 和 /apply 要带和 Clash API 相同的密钥，/rules 只接受面板页面的跨域请求，/apply 不接受任何网页的请求。
 # 手动运行（调试用，管理员 PowerShell）：powershell -ExecutionPolicy Bypass -File helper.ps1 [-Dir C:\neu-v6-free] [-Port 9091]
 param(
   [string]$Dir = $PSScriptRoot,
-  [int]$Port = 0
+  [int]$Port = 0,
+  [int]$SendCtrlC = 0  # 内部用：让这个进程号的 sing-box 正常退出
 )
 $ErrorActionPreference = 'Stop'
+
+# 给 sing-box 发 Ctrl+Break：它会自己撤掉 TUN 网卡和路由再退出（实测 1 秒左右）。sing-box 有自己的（隐藏）控制台，
+# 要先连到它的控制台上；它是以忽略 Ctrl+C 的方式启动的，所以只能发 Ctrl+Break。本进程也会收到并随之结束，
+# 所以单独起一个进程做这件事，助手自己不受影响。只能在同一个会话里用：用户会话里的脚本连不上 SYSTEM 的 sing-box 的控制台
+if ($SendCtrlC) {
+  Add-Type -Namespace NeuV6 -Name Con -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern bool FreeConsole();
+[DllImport("kernel32.dll")] public static extern bool AttachConsole(uint pid);
+[DllImport("kernel32.dll")] public static extern bool SetConsoleCtrlHandler(System.IntPtr handler, bool add);
+[DllImport("kernel32.dll")] public static extern bool GenerateConsoleCtrlEvent(uint ctrlEvent, uint groupId);
+'@
+  [void][NeuV6.Con]::FreeConsole()
+  if (-not [NeuV6.Con]::AttachConsole($SendCtrlC)) { exit 2 }
+  [void][NeuV6.Con]::SetConsoleCtrlHandler([IntPtr]::Zero, $true)
+  if (-not [NeuV6.Con]::GenerateConsoleCtrlEvent(1, 0)) { exit 3 }
+  Start-Sleep -Milliseconds 300
+  exit 0
+}
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $RuleTypes = @('domain_suffix', 'domain', 'domain_keyword', 'ip_cidr', 'process_name')
 $Dir = [System.IO.Path]::GetFullPath($Dir).TrimEnd('\', '/')
@@ -27,6 +53,9 @@ function LoadConfig() {
   $script:Api = 'http://' + $clash.external_controller
   $script:Secret = [string]$clash.secret
   $script:Origins = @($script:Api, $script:Api.Replace('127.0.0.1', 'localhost'))
+  # TUN 网卡名（lib/build.js 里 windows 固定为 neu-v6）；没有 TUN 入站时为空
+  $tun = @(@($script:cfg.inbounds) | Where-Object { $_ -and $_.type -eq 'tun' })[0]
+  $script:TunName = if ($tun) { if ($tun.interface_name) { [string]$tun.interface_name } else { 'neu-v6' } } else { $null }
   # 目标 id → 规则文件、出口名（规则集 user-<id> 和引用它的路由规则）
   $t = [ordered]@{}
   foreach ($rs in @($script:cfg.route.rule_set)) {
@@ -47,6 +76,7 @@ function LoadConfig() {
   $script:Targets = $t
   $script:RulesDir = if ($t.Count) { Split-Path ($t[0].path) } else { Join-Path $Dir 'rules' }
   $script:RulesFile = Join-Path $script:RulesDir 'user-rules.json'
+  if ($script:Traffic) { $script:Traffic.version++ }  # 流量统计线程重新读出口
 }
 
 LoadConfig
@@ -199,20 +229,436 @@ function Change([string]$op, $body) {
   View $rules
 }
 
-# ---------- 运行 sing-box ----------
-function StopSingBox() {
-  if ($script:proc -and -not $script:proc.HasExited) { try { $script:proc.Kill(); [void]$script:proc.WaitForExit(5000) } catch { } }
-  # 上一个助手留下的（助手升级、异常退出时）
-  Get-Process -Name 'sing-box' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $SingBox } | ForEach-Object {
-    try { $_.Kill(); [void]$_.WaitForExit(5000) } catch { }
+# ---------- 断网保护 ----------
+# 经 sing-box 的探测：域名（走 TUN、sing-box 的 DNS 与分流）；绕过 sing-box 的探测：绑定物理网卡的地址访问 IP（不经 DNS）
+$TunProbes = @('https://www.taobao.com', 'https://www.baidu.com', 'https://www.qq.com')
+$DirectProbes6 = @('http://[2400:3200::1]/', 'http://[2402:4e00::]/')
+$DirectProbes4 = @('http://220.181.111.1/', 'http://110.242.68.66/')
+$SafeFile = Join-Path $Dir 'safe-mode.json'
+$IsWin = $env:OS -eq 'Windows_NT'
+$Curl = if ($IsWin) { 'curl.exe' } else { 'curl' }  # 非 Windows 只用于开发测试
+$NullDev = if ($IsWin) { 'NUL' } else { '/dev/null' }
+$script:safe = $null
+$script:fails = 0
+$script:offline = 0
+$script:lastStopTest = [DateTime]::MinValue
+$script:lastWatch = Get-Date
+$script:restarts = New-Object System.Collections.ArrayList
+
+function Responds([string]$url, [string]$bind) {
+  $a = @('-skI', '-o', $NullDev, '-m', '6', '--noproxy', '*', '-w', '%{http_code}')
+  if ($bind) { $a += @('--interface', $bind) }
+  $code = & $Curl @a $url 2>$null
+  return ([bool]$code -and $code -ne '000')
+}
+
+# 物理网卡的地址（排除 sing-box 的 neu-v6 网卡和其他虚拟网卡）
+function PhysicalAddrs() {
+  $r = @{ v4 = @(); v6 = @() }
+  if (-not $IsWin) { return $r }
+  $cfgs = @(Get-NetIPConfiguration -ErrorAction SilentlyContinue | Where-Object {
+    ($_.IPv4DefaultGateway -or $_.IPv6DefaultGateway) -and $_.InterfaceAlias -ne 'neu-v6' -and
+    $_.InterfaceAlias -notmatch 'vEthernet|Radmin|Teredo' -and
+    $_.NetAdapter.InterfaceDescription -notmatch 'Wintun|TAP-Windows|Tailscale|WireGuard|Clash|Meta|Radmin|Hyper-V|VMware|VirtualBox|ZeroTier' })
+  $r.v4 = @($cfgs | ForEach-Object { $_.IPv4Address.IPAddress } | Where-Object { $_ })
+  $r.v6 = @($cfgs | ForEach-Object { $_.IPv6Address.IPAddress } | Where-Object { $_ -like '2*' })
+  return $r
+}
+
+# ok：经 sing-box 能上网；broken：经 sing-box 不通、绕过它能通（sing-box 的问题）；offline：网络本身不通
+function DirectOk() {
+  $p = PhysicalAddrs
+  foreach ($ip in $p.v6) { foreach ($u in $DirectProbes6) { if (Responds $u $ip) { return $true } } }
+  foreach ($ip in $p.v4) { foreach ($u in $DirectProbes4) { if (Responds $u $ip) { return $true } } }
+  return $false
+}
+
+function NetState() {
+  foreach ($u in $TunProbes) { if (Responds $u '') { return 'ok' } }
+  if (DirectOk) { return 'broken' }
+  return 'offline'
+}
+
+# sing-box 的 TUN 网卡起来了没有。打开 TUN 卡住时（例如上一次被强杀）sing-box 进程还在，网络照常直连，
+# 只看「能不能上网」会误以为它在正常工作
+function TunUp() {
+  if (-not $IsWin -or -not $script:TunName) { return $true }
+  return [bool](Get-NetAdapter -Name $script:TunName -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' })
+}
+
+# sing-box 刚启动时给它一点时间；期间 TUN 起来并且能上网就返回 ok。到时间 TUN 还没起来算 broken（sing-box 没在工作）
+function WaitNet([int]$seconds = 25) {
+  $end = (Get-Date).AddSeconds($seconds)
+  $st = 'broken'
+  while ((Get-Date) -lt $end) {
+    Start-Sleep -Seconds 4
+    if (-not (TunUp)) { continue }
+    $st = NetState
+    if ($st -eq 'ok') { return $st }
   }
+  return $st
+}
+
+# 「绕过 sing-box」的探测并不总是真的绕过（例如 WeakHostSend 打开时，绑定物理网卡地址的包照样进 TUN），
+# 所以「经 sing-box 不通、绕过也不通」时，停掉 sing-box 再试一次才算数：停掉就通 = 是 sing-box 的问题（返回 $true，sing-box 保持停止）；
+# 停掉也不通 = 网络本身不通，重新启动 sing-box
+function OkWithoutSingBox() {
+  $script:lastStopTest = Get-Date
+  StopSingBox
+  for ($i = 0; $i -lt 3; $i++) {
+    Start-Sleep -Seconds 3
+    foreach ($u in $TunProbes) { if (Responds $u '') { Log '停掉 sing-box 后能上网：是 sing-box 的问题'; return $true } }
+  }
+  StartSingBox
+  return $false
+}
+
+# 启动（更新、重新启用）后的判断：ok / broken（sing-box 的问题）/ offline（网络本身不通，sing-box 在运行）
+function CheckAfterStart() {
+  $st = WaitNet
+  if ($st -ne 'offline') { return $st }
+  if (OkWithoutSingBox) { return 'broken' }
+  return 'offline'
+}
+
+# ---------- 物理网卡的 WeakHostSend ----------
+# 网卡打开了「弱主机发送」时，绑定在它上面的连接也按整张路由表走：TUN 的默认路由优先级最高，
+# sing-box 自己连服务器、查 DNS 的包就绕回自己的 TUN，全部超时，整台电脑断网（实测：IPv6 打开、IPv4 关着时，只有 IPv6 全断）。
+# Windows 默认是关的，有的软件会把它打开。sing-box 运行期间把物理网卡的这一项关掉，暂停、安全模式、卸载时恢复原值。
+# 改过哪些记在 weakhost.json：助手重启、电脑重启后也能恢复
+$WeakHostFile = Join-Path $Dir 'weakhost.json'
+
+function FixWeakHost() {
+  if (-not $IsWin) { return }
+  try {
+    $saved = [ordered]@{}
+    if (Test-Path $WeakHostFile) {
+      foreach ($p in ([System.IO.File]::ReadAllText($WeakHostFile, $utf8) | ConvertFrom-Json).PSObject.Properties) { $saved[$p.Name] = $p.Value }
+    }
+    $changed = $false
+    foreach ($a in @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue)) {
+      foreach ($i in @(Get-NetIPInterface -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue | Where-Object { $_.WeakHostSend -eq 'Enabled' })) {
+        Set-NetIPInterface -InterfaceIndex $a.ifIndex -AddressFamily $i.AddressFamily -WeakHostSend Disabled
+        $saved["$($a.InterfaceGuid)|$($i.AddressFamily)"] = 'Enabled'
+        $changed = $true
+        Log "网卡「$($a.Name)」的 $($i.AddressFamily) 打开了 WeakHostSend（会让 sing-box 自己的连接绕回 TUN），已暂时关掉，停止时恢复"
+      }
+    }
+    if ($changed) { WriteText $WeakHostFile (ConvertTo-Json -InputObject $saved -Compress) }
+  } catch { Log "检查 WeakHostSend 失败：$_" }
+}
+
+function RestoreWeakHost() {
+  if (-not (Test-Path $WeakHostFile)) { return }
+  try {
+    foreach ($p in ([System.IO.File]::ReadAllText($WeakHostFile, $utf8) | ConvertFrom-Json).PSObject.Properties) {
+      $guid, $family = $p.Name.Split('|')
+      $a = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceGuid -eq $guid })[0]
+      if ($a) { Set-NetIPInterface -InterfaceIndex $a.ifIndex -AddressFamily $family -WeakHostSend $p.Value -ErrorAction SilentlyContinue }
+    }
+    Remove-Item $WeakHostFile -Force
+    Log '已把物理网卡的 WeakHostSend 恢复成原来的设置'
+  } catch { Log "恢复 WeakHostSend 失败：$_" }
+}
+
+function LoadSafeMode() {
+  if (-not (Test-Path $SafeFile)) { return $null }
+  try { return ([System.IO.File]::ReadAllText($SafeFile, $utf8) | ConvertFrom-Json) } catch { return [pscustomobject]@{ since = ''; reason = '未知' } }
+}
+
+# 停掉 sing-box（TUN 随之撤销，电脑回到普通网络），记下原因；重启电脑后也保持，直到手动重新启用或更新配置
+function EnterSafeMode([string]$reason) {
+  StopSingBox
+  RestoreWeakHost
+  $script:safe = [pscustomobject]@{ since = (Get-Date).ToString('s'); reason = $reason }
+  WriteText $SafeFile (ConvertTo-Json -InputObject $script:safe -Compress)
+  Log "进入安全模式：$reason"
+}
+
+function LeaveSafeMode() {
+  if (Test-Path $SafeFile) { Remove-Item $SafeFile -Force }
+  $script:safe = $null
+  $script:restarts.Clear()
+  StartSingBox
+}
+
+# 重新启用：启动 sing-box 并确认能上网，不行就退回安全模式
+function Resume() {
+  LeaveSafeMode
+  if ((CheckAfterStart) -eq 'broken') {
+    EnterSafeMode '重新启用后经 sing-box 仍然上不了网'
+    Bad '重新启用后经 sing-box 仍然上不了网，已再次暂停。看 sing-box.log；离开校园网时先在面板里选「不用服务器」'
+  }
+  Log '已重新启用'
+  ServerCheck $true; $script:firstCheck = $false
+  [ordered]@{ ok = $true; server_fallback = (LoadFallback) }
+}
+
+
+# ---------- 服务器连不上时自动改走「不用服务器」 ----------
+$EntryName = '免流服务器'           # 与 lib/groups.js 一致
+$EntryOff = '不用服务器（离校时选）'
+$FallbackFile = Join-Path $Dir 'server-fallback.json'
+$script:guard = @{ fails = 0; oks = 0; lastRetry = [DateTime]::MinValue; checked = $false }
+
+# 调 sing-box 的 Clash API。按 UTF-8 解码：PowerShell 5.1 的 Invoke-RestMethod 会把中文分组名解成乱码
+function Clash([string]$method, [string]$path, $body) {
+  $p = @{ Uri = $script:Api + $path; Method = $method; Headers = @{ Authorization = "Bearer $($script:Secret)" }; TimeoutSec = 12; UseBasicParsing = $true }
+  if ($null -ne $body) { $p.Body = $utf8.GetBytes((ConvertTo-Json -InputObject $body -Compress)); $p.ContentType = 'application/json; charset=utf-8' }
+  $r = Invoke-WebRequest @p
+  $text = $utf8.GetString($r.RawContentStream.ToArray())
+  if ($text) { return ($text | ConvertFrom-Json) }
+}
+function Esc([string]$s) { [Uri]::EscapeDataString($s) }
+function EntryNow() { try { return (Clash 'GET' "/proxies/$(Esc $EntryName)" $null).now } catch { return $null } }
+function ReachableVia([string]$name) {
+  try { $r = Clash 'GET' "/proxies/$(Esc $name)/delay?timeout=6000&url=$(Esc 'https://www.gstatic.com/generate_204')" $null; return [bool]$r.delay } catch { return $false }
+}
+function LoadFallback() {
+  if (-not (Test-Path $FallbackFile)) { return $null }
+  try { return ([System.IO.File]::ReadAllText($FallbackFile, $utf8) | ConvertFrom-Json) } catch { return $null }
+}
+function SetEntry([string]$name) { [void](Clash 'PUT' "/proxies/$(Esc $EntryName)" @{ name = $name }) }
+
+# 模式二才有「免流服务器」。quick：刚启动 / 更新 / 重新启用后立刻判断（连续 2 次连不上就切），平时要连续 3 次
+function ServerCheck([bool]$quick) {
+  $script:guard.checked = $true
+  if (-not (@($script:cfg.outbounds) | Where-Object { $_.tag -eq $EntryName })) { return }
+  $now = EntryNow
+  if (-not $now) { return }
+  $fb = LoadFallback
+  if ($fb) {
+    if ($now -ne $EntryOff) { Remove-Item $FallbackFile -Force; Log '「免流服务器」已被手动改选，不再自动切换'; return }
+    if (((Get-Date) - $script:guard.lastRetry).TotalSeconds -lt 120) { return }
+    $script:guard.lastRetry = Get-Date
+    if (ReachableVia $fb.previous) {
+      $script:guard.oks++
+      if ($script:guard.oks -ge 2) { SetEntry $fb.previous; Remove-Item $FallbackFile -Force; $script:guard.oks = 0; Log "免流服务器又能连上了，已切回「$($fb.previous)」" }
+    } else { $script:guard.oks = 0 }
+    return
+  }
+  if ($now -eq $EntryOff) { $script:guard.fails = 0; return }
+  $tries = if ($quick) { 2 } else { 1 }
+  for ($i = 0; $i -lt $tries; $i++) {
+    if (ReachableVia $EntryName) { $script:guard.fails = 0; return }
+    if ($i + 1 -lt $tries) { Start-Sleep -Seconds 4 }
+  }
+  if (-not (DirectOk)) { $script:guard.fails = 0; return }  # 网络本身不通，不是服务器的问题
+  $script:guard.fails++
+  Log "连不上免流服务器「$now」（第 $($script:guard.fails) 次）"
+  if ($quick -or $script:guard.fails -ge 3) {
+    $script:guard.fails = 0
+    SetEntry $EntryOff
+    $reason = '当前网络连不上免流服务器（离开了校园网、换了网络，或服务器挂了）'
+    WriteText $FallbackFile (ConvertTo-Json -InputObject ([ordered]@{ previous = $now; since = (Get-Date).ToString('s'); reason = $reason }) -Compress)
+    Log "免流服务器连不上，已自动改走「$EntryOff」（原来是「$now」）"
+  }
+}
+
+# ---------- 流量统计（/traffic）----------
+# 与 mac/helper.py 相同：每秒读一次 Clash API 的 /connections，按每条连接的实际出口记账：
+#   v6 校园网 IPv6 直连（免费）；server 经免流服务器（免费，按服务器分开）；v4 校园网 IPv4 直连（计费）；lan 局域网 / 校园网内；other 看不出来的直连
+# 连接在两次采样之间关闭时丢掉的尾巴，用 sing-box 的总流量补齐，按本次各类占比分摊。每 30 秒存一次 traffic.json，格式与 mac 相同。
+# 放在单独的线程里：主线程做断网检查时会卡住几十秒，放在一起会漏记
+$TrafficFile = Join-Path $Dir 'traffic.json'
+$script:Traffic = [hashtable]::Synchronized(@{ json = $null; config = $Config; file = $TrafficFile; version = 0; stop = $false })
+$TrafficCollector = {
+  param($sh)
+  Add-Type -AssemblyName System.Web.Extensions
+  $js = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+  $js.MaxJsonLength = [int]::MaxValue
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  $groupTypes = @('selector', 'urltest')
+  $m = @{}
+
+  function Empty() { @{ v6 = 0; server = @{}; v4 = 0; lan = 0; other = 0 } }
+  function AddTo($b, [string]$k, $n) {
+    if ($k.StartsWith('server|')) { $s = $k.Substring(7); $b['server'][$s] = $b['server'][$s] + $n } else { $b[$k] = $b[$k] + $n }
+  }
+  function LoadOut() {
+    $c = $js.DeserializeObject([IO.File]::ReadAllText($sh.config, $utf8))
+    $clash = $c['experimental']['clash_api']
+    $m.api = 'http://' + $clash['external_controller']
+    $m.secret = [string]$clash['secret']
+    $m.out = New-Object System.Collections.Hashtable ([StringComparer]::Ordinal)
+    foreach ($o in $c['outbounds']) { $m.out[[string]$o['tag']] = $o }
+    $m.members = New-Object System.Collections.Hashtable ([StringComparer]::Ordinal)
+    $e = $m.out['免流服务器']  # 与 lib/groups.js 一致
+    if ($e) {
+      foreach ($t in $e['outbounds']) { $o = $m.out[[string]$t]; if ($o -and $groupTypes -notcontains $o['type'] -and $o['type'] -ne 'direct') { $m.members[[string]$t] = $true } }
+    }
+  }
+  function Api([string]$path) {
+    $r = [System.Net.HttpWebRequest]::Create($m.api + $path)
+    $r.Proxy = $null; $r.Timeout = 5000; $r.ReadWriteTimeout = 5000
+    $r.Headers['Authorization'] = "Bearer $($m.secret)"
+    $resp = $r.GetResponse()
+    try { return $js.DeserializeObject((New-Object System.IO.StreamReader($resp.GetResponseStream(), $utf8)).ReadToEnd()) } finally { $resp.Close() }
+  }
+  # 出口 tag → @('server', 服务器名) / @('v6') / @('v4') / @('direct', 解析策略) / @('other')
+  function Resolve([string]$tag, $now, [int]$depth) {
+    $o = $m.out[$tag]
+    if (-not $o -or $depth -gt 8) { return , @('other') }
+    $t = $o['type']
+    if ($groupTypes -contains $t) {
+      $sel = $now[$tag]
+      if (-not $sel) { $sel = $o['default'] }
+      if (-not $sel -and $o['outbounds']) { $sel = $o['outbounds'][0] }
+      return , (Resolve ([string]$sel) $now ($depth + 1))
+    }
+    if ($t -eq 'direct') { $st = ''; if ($o['domain_resolver']) { $st = [string]$o['domain_resolver']['strategy'] }; return , @('direct', $st) }
+    if ($m.members.ContainsKey($tag)) { return , @('server', ($tag -replace ' [^ ]*$', '')) }  # 入口名「<服务器名> <协议>」→ 服务器名
+    if ($o['detour']) { $r = Resolve ([string]$o['detour']) $now ($depth + 1); if ($r[0] -eq 'server') { return , $r } }
+    $ip = $null
+    if ([System.Net.IPAddress]::TryParse([string]$o['server'], [ref]$ip) -and $ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6) { return , @('v6') }
+    return , @('v4')
+  }
+  function IsLan([System.Net.IPAddress]$ip) {
+    if ([System.Net.IPAddress]::IsLoopback($ip) -or $ip.IsIPv6LinkLocal -or $ip.IsIPv6Multicast -or $ip.IsIPv6SiteLocal) { return $true }
+    $b = $ip.GetAddressBytes()
+    if ($b.Length -eq 4) {
+      return ($b[0] -eq 10 -or $b[0] -eq 0 -or $b[0] -eq 127 -or ($b[0] -eq 172 -and ($b[1] -band 0xF0) -eq 16) -or ($b[0] -eq 192 -and $b[1] -eq 168) -or
+        ($b[0] -eq 169 -and $b[1] -eq 254) -or ($b[0] -eq 198 -and ($b[1] -band 0xFE) -eq 18) -or $b[0] -ge 224)
+    }
+    return (($b[0] -band 0xFE) -eq 0xFC -or ($b[0] -eq 0x20 -and $b[1] -eq 0x01 -and $b[2] -eq 0x0D -and $b[3] -eq 0xB8))
+  }
+  function Classify($c, $now) {
+    $chains = @($c['chains'])
+    $r = if ($chains.Count -and $chains[0]) { Resolve ([string]$chains[0]) $now 0 } else { , @('other') }
+    if ($r[0] -eq 'server') { return "server|$($r[1])" }
+    if ($r[0] -ne 'direct') { return [string]$r[0] }
+    if ($r[1] -eq 'ipv6_only' -or $r[1] -eq 'prefer_ipv6') { return 'v6' }
+    if ($r[1] -eq 'ipv4_only') { return 'v4' }
+    $md = $c['metadata']
+    $h = ([string]$md['host']).ToLowerInvariant()
+    if ($h -eq 'neu.edu.cn' -or $h.EndsWith('.neu.edu.cn')) { return 'lan' }
+    $ip = $null
+    if (-not [System.Net.IPAddress]::TryParse([string]$md['destinationIP'], [ref]$ip)) { return 'other' }
+    if (IsLan $ip) { return 'lan' }
+    if ($ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6) { return 'v6' }
+    return 'v4'
+  }
+
+  $state = $null
+  try { $state = $js.DeserializeObject([IO.File]::ReadAllText($sh.file, $utf8)) } catch { }
+  if (-not ($state -is [System.Collections.IDictionary])) { $state = @{} }
+  if (-not $state['since']) { $state['since'] = (Get-Date).ToString('s') }
+  foreach ($k in 'months', 'days') { if (-not ($state[$k] -is [System.Collections.IDictionary])) { $state[$k] = @{} } }
+  function Save() {
+    $tmp = "$($sh.file).tmp"
+    [IO.File]::WriteAllText($tmp, $js.Serialize($state), $utf8)
+    Move-Item -LiteralPath $tmp -Destination $sh.file -Force
+  }
+
+  $last = $null; $lastTotal = $null; $lastT = $null; $now = @{}; $mix = @{}
+  $tick = 0; $ver = -1; $lastSave = Get-Date
+  $live = @{ rate = (Empty); updated = $null; ok = $false }
+  while (-not $sh.stop) {
+    $t0 = Get-Date
+    try {
+      if ($ver -ne $sh.version) { $ver = $sh.version; LoadOut; $last = $null; $lastTotal = $null }  # /apply 装了新配置
+      if ($tick % 5 -eq 0) {
+        $now = @{}
+        $p = (Api '/proxies')['proxies']
+        foreach ($k in $p.Keys) { if ($p[$k]['now']) { $now[$k] = [string]$p[$k]['now'] } }
+      }
+      $d = Api '/connections'
+      $total = [long]$d['downloadTotal'] + [long]$d['uploadTotal']
+      $cur = @{}; $deltas = @{}
+      foreach ($c in @($d['connections'])) {
+        if (-not $c) { continue }
+        $n = [long]$c['upload'] + [long]$c['download']
+        $cur[[string]$c['id']] = $n
+        if ($null -eq $last) { continue }  # 刚启动：已有连接只取基线，不重复记
+        $delta = $n - [long]$last[[string]$c['id']]
+        if ($delta -lt 0) { $delta = $n }
+        if ($delta) { $k = Classify $c $now; $deltas[$k] = [long]$deltas[$k] + $delta }
+      }
+      if ($null -ne $lastTotal -and $total -ge $lastTotal) {
+        $sum = [long]0; foreach ($v in $deltas.Values) { $sum += $v }
+        $rest = ($total - $lastTotal) - $sum
+        $base = if ($deltas.Count) { $deltas } else { $mix }
+        if ($rest -gt 0 -and $base.Count) {
+          $s = [long]0; foreach ($v in $base.Values) { $s += $v }
+          foreach ($k in @($base.Keys)) { $deltas[$k] = [long]$deltas[$k] + [long][Math]::Floor($rest * $base[$k] / $s) }
+        }
+      }
+      if ($deltas.Count) { $mix = $deltas.Clone() }
+      $dt = 1.0
+      if ($lastT) { $dt = [Math]::Max(((Get-Date) - $lastT).TotalSeconds, 0.5) }
+      $rate = Empty
+      $stamp = Get-Date
+      $mk = $stamp.ToString('yyyy-MM'); $dk = $stamp.ToString('yyyy-MM-dd')
+      if (-not $state['months'][$mk]) { $state['months'][$mk] = Empty }
+      if (-not $state['days'][$dk]) { $state['days'][$dk] = Empty }
+      foreach ($k in $deltas.Keys) {
+        AddTo $state['months'][$mk] $k $deltas[$k]
+        AddTo $state['days'][$dk] $k $deltas[$k]
+        AddTo $rate $k ($deltas[$k] / $dt)
+      }
+      $days = @($state['days'].Keys | Sort-Object)
+      if ($days.Count -gt 62) { foreach ($k in $days[0..($days.Count - 63)]) { [void]$state['days'].Remove($k) } }
+      $live = @{ rate = $rate; updated = $stamp.ToString('s'); ok = $true }
+      $lastT = Get-Date
+      $last = $cur; $lastTotal = $total
+    } catch {  # sing-box 重启或没在运行：重新取基线
+      $last = $null; $lastTotal = $null; $lastT = $null
+      $live = @{ rate = $live.rate; updated = $live.updated; ok = $false; error = ([string]$_.Exception.Message) }
+    }
+    $state['live'] = $live
+    $sh.json = $js.Serialize($state)
+    [void]$state.Remove('live')
+    $tick++
+    if (((Get-Date) - $lastSave).TotalSeconds -gt 30) { try { Save } catch { }; $lastSave = Get-Date }
+    $wait = 1000 - ((Get-Date) - $t0).TotalMilliseconds
+    Start-Sleep -Milliseconds ([Math]::Max([int]$wait, 100))
+  }
+  try { Save } catch { }
+  $sh.saved = $true
+}
+
+function StartTraffic() {
+  if (-not $IsWin) { return }  # 用到 .NET Framework 的 JavaScriptSerializer，只有 Windows PowerShell 有
+  $ps = [powershell]::Create()
+  $ps.Runspace = [runspacefactory]::CreateRunspace()
+  $ps.Runspace.Open()
+  [void]$ps.AddScript($TrafficCollector.ToString()).AddArgument($script:Traffic)
+  [void]$ps.BeginInvoke()
+  $script:TrafficPs = $ps
+}
+
+# ---------- 运行 sing-box ----------
+# 先让它自己退出（Ctrl+Break，见文件开头），10 秒没退再强杀。
+# 强杀会留下没清理干净的 TUN 网卡：紧接着再启动时打不开 TUN（实测十几秒后以代码 1 退出）
+function StopProcess($p) {
+  if (-not $p -or $p.HasExited) { return }
+  Log "停止 sing-box（pid $($p.Id)）"
+  if ($IsWin) {
+    try {
+      $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+      Start-Process $ps -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$PSCommandPath`" -SendCtrlC $($p.Id)" -WindowStyle Hidden -Wait
+      if ($p.WaitForExit(10000)) { return }
+      Log "sing-box（pid $($p.Id)）10 秒内没有正常退出，强制结束"
+    } catch { }
+  }
+  try { $p.Kill(); [void]$p.WaitForExit(5000) } catch { }
+}
+
+function StopSingBox() {
+  StopProcess $script:proc
+  # 上一个助手留下的（助手升级、异常退出时）
+  Get-Process -Name 'sing-box' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $SingBox } | ForEach-Object { StopProcess $_ }
   $script:proc = $null
 }
 
 function StartSingBox() {
   StopSingBox
   if (-not (Test-Path $SingBox)) { Log "找不到 $SingBox，重新运行 install.ps1"; return }
+  FixWeakHost
   New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+  # 上一次的日志留一份：sing-box 退出的原因在里面，重新启动会把 sing-box.log 清空
+  $log = Join-Path $Dir 'sing-box.log'
+  if (Test-Path $log) { Move-Item $log (Join-Path $Dir 'sing-box.prev.log') -Force -ErrorAction SilentlyContinue }
   $script:lastStart = Get-Date
   $opt = @{
     FilePath = $SingBox; ArgumentList = "run -c `"$Config`" -D `"$DataDir`" --disable-color"; WorkingDirectory = $DataDir; PassThru = $true
@@ -220,15 +666,45 @@ function StartSingBox() {
   }
   if ($env:OS -eq 'Windows_NT') { $opt.WindowStyle = 'Hidden' }  # 其他系统上的 PowerShell（开发测试）没有这个参数
   $script:proc = Start-Process @opt
+  try { [void]$script:proc.Handle } catch { }  # 先拿住进程句柄，退出后才读得到退出代码
   Log "sing-box 已启动（pid $($script:proc.Id)）"
+  $script:firstCheck = $true
 }
 
-# 每秒看一眼：退出了就重新拉起（两次之间至少隔 10 秒，免得配置有错时疯狂重启）
+# 每秒看一眼：退出了就重新拉起（两次之间至少隔 10 秒）；3 分钟内退出 5 次就不再拉起（安全模式）。
+# 每 30 秒检查一次网络，连续 3 次「经 sing-box 不通、绕过它能通」也进安全模式；
+# 连续 3 次「都不通」时停掉 sing-box 试一次（最多 10 分钟一次），停掉就通也进安全模式
 function Supervise() {
-  if ($script:proc -and -not $script:proc.HasExited) { return }
-  if (((Get-Date) - $script:lastStart).TotalSeconds -lt 10) { return }
-  if ($script:proc) { Log "sing-box 退出了（代码 $($script:proc.ExitCode)），重新启动；原因见 sing-box.log" }
-  StartSingBox
+  if ($script:safe) { return }
+  $running = $script:proc -and -not $script:proc.HasExited
+  if (-not $running) {
+    if (((Get-Date) - $script:lastStart).TotalSeconds -lt 10) { return }
+    if ($script:proc) {
+      Log "sing-box 退出了（代码 $($script:proc.ExitCode)），原因见 sing-box.prev.log"
+      $now = Get-Date
+      [void]$script:restarts.Add($now)
+      foreach ($t in @($script:restarts)) { if (($now - $t).TotalMinutes -gt 3) { $script:restarts.Remove($t) } }
+      if ($script:restarts.Count -ge 5) { EnterSafeMode 'sing-box 3 分钟内退出了 5 次（看 sing-box.log 和 sing-box.prev.log）'; return }
+    }
+    StartSingBox
+    return
+  }
+  if (((Get-Date) - $script:lastWatch).TotalSeconds -lt 30) { return }
+  $script:lastWatch = Get-Date
+  if (((Get-Date) - $script:lastStart).TotalSeconds -lt 20) { return }  # 刚启动，等它准备好
+  FixWeakHost  # 新插上的网卡（网线、USB 网卡）
+  $st = NetState
+  if ($st -eq 'broken') { $script:fails++; Log "经 sing-box 上不了网，绕过它能上（第 $($script:fails) 次）" } else { $script:fails = 0 }
+  if ($st -eq 'offline') { $script:offline++ } else { $script:offline = 0 }
+  if ($st -eq 'ok') { ServerCheck ([bool]$script:firstCheck); $script:firstCheck = $false }
+  if ($script:fails -ge 3) {
+    $script:fails = 0
+    EnterSafeMode '连续 3 次检查经 sing-box 上不了网、绕过它能上（配置或 sing-box 本身有问题）'
+  } elseif ($script:offline -ge 3 -and ((Get-Date) - $script:lastStopTest).TotalMinutes -ge 10) {
+    $script:offline = 0
+    Log '连续 3 次检查都上不了网，停掉 sing-box 试一下'
+    if (OkWithoutSingBox) { EnterSafeMode '经 sing-box 上不了网，停掉它就能上（配置或 sing-box 本身有问题）' }
+  }
 }
 
 # ---------- 更新配置（/apply）----------
@@ -287,18 +763,52 @@ function ApplyUpdate($src) {
   Copy-Item $cfgFile $staged -Force
   $out = & $SingBox check --disable-color -c $staged 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) { Remove-Item $staged -Force; Bad "sing-box 检查没通过，旧配置没动：$($out.Trim())" }
+  Copy-Item $Config "$Config.prev" -Force
   Move-Item $staged $Config -Force
   LoadConfig
   ApplyRules (LoadRules)
-  StartSingBox
+  if ($script:safe) { LeaveSafeMode } else { StartSingBox }  # 更新配置 = 重新启用
+  if ((CheckAfterStart) -eq 'broken') {
+    Move-Item "$Config.prev" $Config -Force
+    LoadConfig
+    StartSingBox
+    $st = CheckAfterStart
+    if ($st -eq 'broken') { EnterSafeMode '新配置和旧配置经 sing-box 都上不了网' }
+    Log '新配置装上后经 sing-box 上不了网，已换回旧配置'
+    $extra = if ($st -eq 'broken') { '；旧配置也不通，已暂停 sing-box（安全模式）' } else { '' }
+    Bad "新配置装上后经 sing-box 上不了网，已自动换回旧配置$extra。看 sing-box.log；离开校园网时先在面板里选「不用服务器」"
+  }
   $newHelper = Join-Path $src 'helper.ps1'
   $updated = $false
   if ((Test-Path $newHelper) -and ((Get-FileHash $newHelper).Hash -ne (Get-FileHash $PSCommandPath).Hash)) {
     Copy-Item $newHelper $PSCommandPath -Force
     $updated = $true
   }
-  [ordered]@{ ok = $true; restarted = $true; helper_updated = $updated }
+  ServerCheck $true; $script:firstCheck = $false
+  [ordered]@{ ok = $true; restarted = $true; helper_updated = $updated; server_fallback = (LoadFallback) }
 }
+
+# sing-box 停掉时面板（由 sing-box 提供）打不开，助手自己给一个最简单的状态页
+$StatusPage = @'
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>校园网 v6 免流 · 状态</title><style>body{font:15px/1.6 "Segoe UI","Microsoft YaHei",-apple-system,sans-serif;max-width:620px;margin:40px auto;padding:0 16px;color:#1c2027}
+.card{border:1px solid #e1e4ea;border-radius:12px;padding:16px 18px;margin:12px 0}.ok{color:#157f3b}.warn{color:#b45309}button{padding:6px 14px;border-radius:8px;border:1px solid #2457d6;background:#2457d6;color:#fff;cursor:pointer}
+input{padding:6px 10px;border:1px solid #e1e4ea;border-radius:8px}.muted{color:#646b78;font-size:13px}</style></head><body>
+<h2>校园网 v6 免流 · 状态</h2><div class="card" id="st">读取中……</div>
+<div class="card"><input type="password" id="sec" placeholder="面板密钥"> <button id="go"></button><p class="muted" id="msg"></p></div>
+<p class="muted">面板：<a href="http://127.0.0.1:9090/ui">http://127.0.0.1:9090/ui</a>（sing-box 运行时才能打开）</p>
+<script>
+const $=(i)=>document.getElementById(i);let h=null;try{$("sec").value=localStorage.getItem("neu-secret")||""}catch{}
+async function load(){h=await (await fetch("/health",{cache:"no-store"})).json();
+$("st").innerHTML=h.safe_mode?`<b class="warn">已暂停（安全模式）</b>：电脑现在走普通网络。<br>原因：${h.safe_mode.reason}<br><span class="muted">${String(h.safe_mode.since).replace("T"," ")} 起</span>`
+:(h.singbox?'<b class="ok">运行中</b>：sing-box 正常接管网络。'+(h.server_fallback?`<br><span class="warn">连不上免流服务器，已自动改走「不用服务器」（原来是「${h.server_fallback.previous}」，${String(h.server_fallback.since).replace("T"," ")} 起）；能连上后自动切回。</span>`:''):'<b class="warn">sing-box 没有运行</b>');
+$("go").textContent=h.safe_mode||!h.singbox?"重新启用":"暂停（回到普通网络）";}
+$("go").onclick=async()=>{const s=$("sec").value.trim();try{localStorage.setItem("neu-secret",s)}catch{}
+$("msg").textContent="处理中……（重新启用要等十几秒确认能上网）";
+const r=await fetch(h.safe_mode||!h.singbox?"/resume":"/pause",{method:"POST",headers:{Authorization:"Bearer "+s}});
+const d=await r.json().catch(()=>({}));$("msg").textContent=r.ok?"完成":(d.error||("失败 "+r.status));load();};
+load();</script></body></html>
+'@
 
 function Reply($ctx, [int]$code, $obj) {
   $res = $ctx.Response
@@ -324,7 +834,26 @@ function Handle($ctx) {
   if ($method -eq 'OPTIONS') { $res.StatusCode = 204; $res.Close(); return }
   if ($path -eq '/health') {
     $running = [bool]($script:proc -and -not $script:proc.HasExited)
-    return Reply $ctx 200 ([ordered]@{ ok = $true; rules = [bool]$script:Targets.Count; traffic = $false; apply = $true; singbox = $running })
+    return Reply $ctx 200 ([ordered]@{ ok = $true; rules = [bool]$script:Targets.Count; traffic = [bool]$script:TrafficPs; apply = $true; singbox = $running; tun = ($running -and (TunUp)); safe_mode = $script:safe; server_fallback = (LoadFallback); server_checked = $script:guard.checked })
+  }
+  if ($path -eq '/' -and $method -eq 'GET') {
+    $bytes = $utf8.GetBytes($StatusPage)
+    $res.ContentType = 'text/html; charset=utf-8'
+    $res.ContentLength64 = $bytes.Length
+    $res.OutputStream.Write($bytes, 0, $bytes.Length)
+    $res.Close()
+    return
+  }
+  if (($path -eq '/pause' -or $path -eq '/resume') -and $method -eq 'POST') {
+    # 只认面板和助手自己的状态页
+    $own = @("http://127.0.0.1:$Port", "http://localhost:$Port")
+    if (($origin -and ($script:Origins + $own) -notcontains $origin) -or ($script:Secret -and $req.Headers['Authorization'] -ne "Bearer $($script:Secret)")) {
+      return Reply $ctx 401 ([ordered]@{ error = '密钥不对' })
+    }
+    try {
+      if ($path -eq '/pause') { EnterSafeMode '手动暂停'; return Reply $ctx 200 ([ordered]@{ ok = $true }) }
+      return Reply $ctx 200 (Resume)
+    } catch [System.ArgumentException] { return Reply $ctx 400 ([ordered]@{ error = $_.Exception.Message }) }
   }
   if ($path -eq '/apply' -and $method -eq 'POST') {
     # 只给本机脚本用：网页发来的一律拒绝；必须有密钥
@@ -335,11 +864,20 @@ function Handle($ctx) {
     try {
       $result = ApplyUpdate (($text | ConvertFrom-Json).src)
       Reply $ctx 200 $result
-      if ($result.helper_updated) { Log '助手已升级，退出后由计划任务拉起新版'; $script:restartSelf = $true }
+      if ($result.helper_updated) { Log '助手已升级，退出后几秒内由计划任务拉起新版'; $script:restartSelf = $true }
     } catch [System.ArgumentException] { Reply $ctx 400 ([ordered]@{ error = $_.Exception.Message }) }
     return
   }
-  if ($path -eq '/traffic') { return Reply $ctx 404 ([ordered]@{ error = 'Windows 版暂不支持流量统计' }) }
+  if ($path -eq '/traffic') {
+    $j = $script:Traffic.json
+    if (-not $j) { return Reply $ctx 503 ([ordered]@{ error = '流量统计还在启动' }) }
+    $bytes = $utf8.GetBytes($j)
+    $res.ContentType = 'application/json; charset=utf-8'
+    $res.ContentLength64 = $bytes.Length
+    $res.OutputStream.Write($bytes, 0, $bytes.Length)
+    $res.Close()
+    return
+  }
   if (-not $path.StartsWith('/rules')) { return Reply $ctx 404 ([ordered]@{ error = 'not found' }) }
   # 浏览器里别的网站也能向 127.0.0.1 发请求：要求密钥，并且只认面板页面
   if (($origin -and $script:Origins -notcontains $origin) -or ($script:Secret -and $req.Headers['Authorization'] -ne "Bearer $script:Secret")) {
@@ -364,12 +902,15 @@ function Handle($ctx) {
 
 # 启动时按 user-rules.json 重写一遍规则文件（升级后新增的目标也会有文件），然后启动 sing-box
 ApplyRules (LoadRules)
-StartSingBox
+$script:safe = LoadSafeMode
+if ($script:safe) { StopSingBox; RestoreWeakHost; Log "安全模式（$($script:safe.reason)）：保持 sing-box 停止，在 http://127.0.0.1:$Port/ 重新启用" }
+else { StartSingBox }
 $script:restartSelf = $false
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$Port/")
 try { $listener.Start() } catch { Log "监听 127.0.0.1:$Port 失败（端口被占用，或没有管理员权限）：$_"; throw }
 Log "已启动：127.0.0.1:$Port，安装目录 $Dir"
+try { StartTraffic } catch { Log "流量统计启动失败：$_" }
 while ($listener.IsListening -and -not $script:restartSelf) {
   $wait = $listener.BeginGetContext($null, $null)
   while (-not $wait.AsyncWaitHandle.WaitOne(1000)) { Supervise }
@@ -379,7 +920,17 @@ while ($listener.IsListening -and -not $script:restartSelf) {
     Log "处理 $($ctx.Request.HttpMethod) $($ctx.Request.Url.AbsolutePath) 出错：$_"
     try { Reply $ctx 500 ([ordered]@{ error = "出错了：$($_.Exception.Message)" }) } catch { }
   }
+  # 请求一个接一个来时（例如 install.ps1 每秒查一次 /health），上面的空闲等待一直轮不到看护：sing-box 退出了也不会被拉起
+  Supervise
 }
-# 助手升级：非零退出，计划任务约 1 分钟后拉起新版（sing-box 继续运行，新版启动时会接管）
+# 助手升级：退出后由计划任务拉起新版（sing-box 继续运行，新版启动时会接管）。
+# 计划任务的「失败后重启」只管启动失败、不管退出代码，所以先起一个小进程，等本进程退出后再启动一次计划任务
 $listener.Stop()
+$script:Traffic.stop = $true  # 让统计线程先存盘
+for ($i = 0; $i -lt 30 -and $script:TrafficPs -and -not $script:Traffic.saved; $i++) { Start-Sleep -Milliseconds 100 }
+if ($IsWin) {
+  $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $cmd = "Wait-Process -Id $PID -Timeout 30 -ErrorAction SilentlyContinue; Start-Sleep 2; Start-ScheduledTask -TaskName 'neu-v6-free helper'"
+  Start-Process $ps -ArgumentList "-NoProfile -NonInteractive -WindowStyle Hidden -Command `"$cmd`"" -WindowStyle Hidden
+}
 exit 1
