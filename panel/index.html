@@ -823,6 +823,24 @@ async function start() {
   window.onhashchange = render;
   render();
 }
+
+// sing-box 发面板时不带 Cache-Control，浏览器会一直用缓存里的旧面板。更新后发现服务器上的比缓存里的新，就换上新的再刷新一次
+async function refreshIfStale() {
+  try {
+    const [cached, fresh] = await Promise.all([
+      fetch(location.pathname, { cache: "force-cache" }).then((r) => r.text()),
+      fetch(location.pathname, { cache: "no-store" }).then((r) => r.text()),
+    ]);
+    if (cached === fresh) return;
+    let tried = "";
+    try { tried = sessionStorage.getItem("neu-panel-refresh") || ""; } catch { }
+    if (tried === String(fresh.length)) return;  // 刷新过一次还是旧的：不再循环
+    try { sessionStorage.setItem("neu-panel-refresh", String(fresh.length)); } catch { }
+    await fetch(location.pathname, { cache: "reload" });  // 用新面板替换缓存
+    location.reload();
+  } catch { }
+}
+refreshIfStale();
 start();
 </script>
 </body>
