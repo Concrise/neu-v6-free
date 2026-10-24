@@ -4,8 +4,9 @@
 
 | 文件 | 内容 | 入库 |
 |---|---|---|
-| `profile.yaml` | 入口服务器（Azure 香港优先、Netcup 备用）、默认落地、Brutal、显示名、分组默认值与说明 | ✅ |
-| `config.local.yaml` | 妙妙屋订阅链接、面板密钥、HK 家宽固定端口（10809-10811）与本机直连端口（10812） | ❌（权限 600） |
+| `profile.yaml` | 默认落地、Brutal、显示名、分组默认值与说明 | ✅ |
+| `config.local.yaml` | 入口服务器 IP（港机优先、Netcup 备用）、妙妙屋订阅链接、面板密钥、HK 家宽固定端口（10809-10811）与本机直连端口（10812） | ❌（权限 600） |
+| `servers.local.sh` | 测速 / 诊断 / 监测脚本用的服务器 IP、SSH 端口·用户·私钥名；模板 `servers.example.sh` | ❌（权限 600） |
 | `speedtest-hk.sh` / `speedtest-v6.sh` | 校园网 v6 直连港机 / Netcup 测速（iperf3，暂停 TUN） | ✅ |
 | `diag-v6.sh`、`v6monitor.sh` | 出国 IPv6 诊断；LaunchAgent `com.nk.neu-v6-monitor` 每 30 分钟记录可达性 | ✅ |
 
@@ -34,6 +35,6 @@ node core/cli.js -c profile.yaml -c config.local.yaml -p mac -o /tmp/x
 
 ## 和服务器的关系
 
-- **港机 `azure-hk`**：sing-box 四入站 （端口略）；每月出站 130GB 到上限自动停，此时要在面板把「免流服务器」手动换成 Netcup 的入口或「自动选最快」。
+- **港机 `azure-hk`**：sing-box 四入站；每月出站 130GB 到上限自动停，此时要在面板把「免流服务器」手动换成 Netcup 的入口或「自动选最快」。
 - **妙妙屋「自用东大版」订阅**：`🆓 免流入口` 组对应这里的「免流服务器」（`entry_group_aliases`）。CF 优选节点有意不挂免流入口，所以设了 `landings_via_entry: false`。
 - 服务器侧的详细文档在 netcup 的 `~/docs/services/proxy-network.md`。

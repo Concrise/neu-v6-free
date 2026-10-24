@@ -7,7 +7,8 @@
 set -u
 LABEL=com.nk.neu-v6-router
 PLIST=/Library/LaunchDaemons/$LABEL.plist
-H6=2001:db8::1
+. "$(cd "$(dirname "$0")" && pwd)/servers.local.sh" || { echo "缺 servers.local.sh（模板 servers.example.sh）"; exit 1; }
+H6=$HK_V6
 PORT=5201
 DUR=${DUR:-5}        # 上传与 ping 以外各项的时长（秒）；上传不耗港机出站额度
 DL_MB=${DL_MB:-50}   # TCP 下载按数据量封顶，不按时长，线路再快也不会多耗
@@ -15,12 +16,12 @@ UDP_DUR=${UDP_DUR:-4}
 PAR=${PAR:-0}
 UDP_RATES=${UDP_RATES:-"30 60 100"}
 U=${SUDO_USER:-nk}
-KEY=/Users/$U/.ssh/azure-hk
+KEY=/Users/$U/.ssh/$HK_KEY
 OUT="$(cd "$(dirname "$0")" && pwd)/out/speedtest-hk.txt"
 [ "$(id -u)" = 0 ] || { echo "请用 sudo 运行"; exit 1; }
 
 # 以普通用户身份 ssh，走 v6 地址（TUN 停掉后 v4 会走计费线路）
-hk() { sudo -u "$U" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -i "$KEY" -p 22 "ubuntu@$H6" "$@"; }
+hk() { sudo -u "$U" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -i "$KEY" -p "$SSH_PORT" "$HK_USER@$H6" "$@"; }
 
 IPERF=$(sudo -u "$U" bash -lc 'command -v iperf3' || true)
 [ -n "$IPERF" ] || { echo "本机缺 iperf3，先运行：brew install iperf3"; exit 1; }

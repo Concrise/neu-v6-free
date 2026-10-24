@@ -5,16 +5,17 @@
 set -u
 LABEL=com.nk.neu-v6-router
 PLIST=/Library/LaunchDaemons/$LABEL.plist
-N6=2001:db8::2
+. "$(cd "$(dirname "$0")" && pwd)/servers.local.sh" || { echo "缺 servers.local.sh（模板 servers.example.sh）"; exit 1; }
+N6=$NC_V6
 PORT=5201
 DUR=${DUR:-10}
 PAR=${PAR:-8}
-KEY=/Users/${SUDO_USER:-nk}/.ssh/netcup-key
+KEY=/Users/${SUDO_USER:-nk}/.ssh/$NC_KEY
 OUT="$(cd "$(dirname "$0")" && pwd)/out/speedtest-v6.txt"
 [ "$(id -u)" = 0 ] || { echo "请用 sudo 运行"; exit 1; }
 
 # 以普通用户身份 ssh（用他的 known_hosts），走 v6 地址
-vps() { sudo -u "${SUDO_USER:-nk}" ssh -o ConnectTimeout=10 -o HostKeyAlias=203.0.113.20 -o IdentitiesOnly=yes -i "$KEY" -p 22 "user@$N6" "$@"; }
+vps() { sudo -u "${SUDO_USER:-nk}" ssh -o ConnectTimeout=10 -o HostKeyAlias=$NC_V4 -o IdentitiesOnly=yes -i "$KEY" -p "$SSH_PORT" "$NC_USER@$N6" "$@"; }
 
 IPERF=$(sudo -u "${SUDO_USER:-nk}" bash -lc 'command -v iperf3' || true)
 [ -n "$IPERF" ] || { echo "本机缺 iperf3，先运行：brew install iperf3"; exit 1; }
@@ -22,12 +23,12 @@ IPERF=$(sudo -u "${SUDO_USER:-nk}" bash -lc 'command -v iperf3' || true)
 SRC=$(ifconfig en0 | awk '/inet6 2/ && /secured/ && !/temporary/ {print $2; exit}')
 [ -n "$SRC" ] || { echo "en0 没有全局 IPv6（不在校园网？）"; exit 1; }
 NET="$(echo "$SRC" | cut -d: -f1-4)::/64"
-RULE="-I PUBLIC-INPUT 1 -p tcp --dport $PORT -s $NET -j RETURN"
+RULE="-I $NC_FW_CHAIN 1 -p tcp --dport $PORT -s $NET -j RETURN"
 
 cleanup() {
   launchctl bootstrap system "$PLIST" 2>/dev/null; sleep 3
   echo "服务已恢复：$(launchctl print system/$LABEL 2>/dev/null | grep -m1 'state')"
-  [ -n "${PREPPED:-}" ] && vps "sudo ip6tables ${RULE/-I PUBLIC-INPUT 1/-D PUBLIC-INPUT}; sudo pkill -x iperf3" && echo "VPS 临时规则已删、iperf3 已关"
+  [ -n "${PREPPED:-}" ] && vps "sudo ip6tables ${RULE/-I $NC_FW_CHAIN 1/-D $NC_FW_CHAIN}; sudo pkill -x iperf3" && echo "VPS 临时规则已删、iperf3 已关"
   chown "${SUDO_USER:-root}" "$OUT" 2>/dev/null
 }
 trap cleanup EXIT
