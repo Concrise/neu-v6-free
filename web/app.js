@@ -1,13 +1,13 @@
 // 网页生成器：全部在浏览器里完成，不上传任何内容。与命令行共用 lib/ 里的生成逻辑。
 import yaml from "../lib/js-yaml.mjs";
-import { build } from "../lib/build.js";
+import { DEFAULTS, build, rsTag, ruleSetRefs, ruleSetUrl } from "../lib/build.js";
 import { ABROAD, CN4, ENTRY } from "../lib/groups.js";
 import { makeZip } from "./zip.js";
 
 const $ = (id) => document.getElementById(id);
 const STORE = "neu-v6-free-inputs";
 const FIELDS = ["server", "sub", "advanced"];
-const PLATFORM_NAMES = { mac: "macOS（sing-box App）", windows: "Windows（v2rayN）", android: "Android", ios: "iOS" };
+const PLATFORM_NAMES = { mac: "macOS（sing-box App）", windows: "Windows（安装包）", android: "Android", ios: "iOS" };
 
 let parsed = null; // { settings, proxies }
 let choices = {}; // 分组名 → 用户选的默认出口
@@ -111,6 +111,29 @@ async function getPanelHtml() {
   return panelHtml;
 }
 
+// Windows 脚本按字节取：它们带 UTF-8 BOM（Windows 自带的 PowerShell 5.1 靠它识别中文），按文本读会丢掉
+const WINDOWS_SCRIPTS = ["install.ps1", "update.ps1", "uninstall.ps1", "helper.ps1"];
+let windowsScripts = null;
+
+// 规则集从 GitHub 下载（raw.githubusercontent.com 允许跨域），装进 zip 的 rules/
+async function getRuleSets(settings) {
+  const base = settings.rule_set_base || DEFAULTS.rule_set_base;
+  const refs = ruleSetRefs("windows", settings);
+  const out = [];
+  for (const [i, ref] of refs.entries()) {
+    $("secret").textContent = `正在下载规则集 ${i + 1} / ${refs.length}……`;
+    const r = await fetch(ruleSetUrl(base, ref));
+    if (!r.ok) throw new Error(`规则集下载失败：${ref}（HTTP ${r.status}）`);
+    out.push({ name: `neu-v6-free/rules/${rsTag(ref)}.srs`, data: new Uint8Array(await r.arrayBuffer()) });
+  }
+  return out;
+}
+async function getWindowsScripts() {
+  windowsScripts ??= await Promise.all(WINDOWS_SCRIPTS.map(async (n) => ({
+    name: `neu-v6-free/${n}`, data: new Uint8Array(await (await fetch(`../windows/${n}`)).arrayBuffer()) })));
+  return windowsScripts;
+}
+
 async function generate(platform) {
   const settings = withChoices();
   if (platform === "mac") settings.mac_app = true;
@@ -121,6 +144,12 @@ async function generate(platform) {
       { name: "neu-v6-free/config.json", data: json },
       { name: "neu-v6-free/panel/index.html", data: await getPanelHtml() },
       { name: "neu-v6-free/panel/groups.json", data: JSON.stringify(panel, null, 1) },
+      // 本地规则集：Windows 版启动不依赖网络（服务器不通时也能起来）
+      ...await getRuleSets(settings),
+      // 「我的规则」的空文件：install.ps1 只补缺的，不覆盖已有规则
+      ...config.route.rule_set.filter((r) => r.tag.startsWith("user-"))
+        .map((r) => ({ name: `neu-v6-free/rules/${r.tag}.json`, data: '{"version":2,"rules":[]}\n' })),
+      ...await getWindowsScripts(),
     ]);
     download("neu-v6-free-windows.zip", zip);
     $("secret").textContent = `Windows 面板密钥：${settings.clash_api_secret}（面板 http://127.0.0.1:9090/ui 登录用，也在 config.json 里）`;

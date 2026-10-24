@@ -1,28 +1,44 @@
 # 自用配置
 
-东大校园网 IPv6 免流的自用配置（原 neu-v6-router 仓库）。生成逻辑全部来自上一级目录的通用版，这里只放个人的东西。以下命令都在 `personal/` 里运行。
+东大校园网 IPv6 免流的自用配置（原 neu-v6-router 仓库），走的是第二部分（自带服务器）。生成和安装全部用上一级目录的通用版，这里只放个人设置和几个测试脚本。
+以下命令都在 `personal/` 里运行。
+
+## 文件
 
 | 文件 | 内容 | 入库 |
 |---|---|---|
-| `profile.yaml` | 默认落地、Brutal、显示名、分组默认值与说明 | ✅ |
-| `config.local.yaml` | 入口服务器 IP（港机优先、Netcup 备用）、妙妙屋订阅链接、面板密钥、HK 家宽固定端口（10809-10811）与本机直连端口（10812） | ❌（权限 600） |
+| `profile.yaml` | 默认落地、Brutal、显示名、分组默认值与面板说明 | ✅ |
+| `config.local.yaml` | 入口服务器 IP（港机在前 = 默认入口，Netcup 在后也当落地）、妙妙屋订阅链接、面板密钥、HK 家宽固定端口（10809-10811）与本机直连端口（10812） | ❌（权限 600） |
 | `servers.local.sh` | 测速 / 诊断 / 监测脚本用的服务器 IP、SSH 端口·用户·私钥名；模板 `servers.example.sh` | ❌（权限 600） |
-| `speedtest-hk.sh` / `speedtest-v6.sh` | 校园网 v6 直连港机 / Netcup 测速（iperf3，暂停 TUN） | ✅ |
-| `diag-v6.sh`、`v6monitor.sh` | 出国 IPv6 诊断；LaunchAgent `com.nk.neu-v6-monitor` 每 30 分钟记录可达性 | ✅ |
+| `install.sh` / `update.sh` / `uninstall.sh` | 通用版 mac 脚本的包装：固定服务名 `com.nk.neu-v6-router`、安装目录名 `neu-v6-router` | ✅ |
+| `speedtest-hk.sh` / `speedtest-v6.sh` | 校园网 v6 直连港机 / Netcup 测速（iperf3，会暂停 TUN） | ✅ |
+| `diag-v6.sh`、`v6monitor.sh` | 出国 IPv6 诊断；`v6monitor.sh` 由 LaunchAgent 每 30 分钟记录可达性 | ✅ |
+| `test-sites.sh` | 国内常用站冒烟测试 | ✅ |
+
+设置分三层，后面的覆盖前面的：通用版内置的分组与默认值 → `profile.yaml` → `config.local.yaml`。
+
+## macOS：现在怎么运行
+
+| 组件 | 是什么 |
+|---|---|
+| `com.nk.neu-v6-router`（LaunchDaemon） | sing-box（从 v2rayN 拷出来的），配置 `/usr/local/etc/neu-v6-router/config.json`，含 TUN |
+| `com.nk.neu-v6-router.helper`（LaunchDaemon） | 本地助手 `127.0.0.1:9091`：我的规则、流量统计、免 sudo 更新 |
+| `com.nk.neu-v6-monitor`（LaunchAgent） | 每 30 分钟跑一次 `personal/v6monitor.sh`，日志 `out/v6monitor.log` |
+
+端口：10808 普通代理；10809-10811 各固定一条 HK 家宽（给指纹浏览器）；10812 本机直连 v4；面板 `http://127.0.0.1:9090/ui`。
+
+运行的服务和仓库是分开的：安装 / 更新时配置、面板、规则集被复制到 `/usr/local/{libexec,etc,var}/neu-v6-router`。
+仓库挪位置不影响服务，只有监测的 LaunchAgent 引用了仓库路径。
 
 ## 日常
 
 ```bash
-./update.sh              # 改了 profile / 订阅后：重新生成并热更新（sudo）
-./install.sh             # 首次安装或重装（默认用 v2rayN 自带的 sing-box）
-sudo ./uninstall.sh      # 卸载，之后可重新打开 FlClash / v2rayN
+./update.sh              # 改了 profile / 订阅后：重新生成并装上（不用 sudo，交给本地助手）
+./install.sh             # 重装（只有这个要 sudo）
+sudo ./uninstall.sh      # 卸载（保留我的规则和流量统计；加 --purge 全删），之后可以打开 FlClash / v2rayN
 ```
 
-服务沿用旧名字：LaunchDaemon `com.nk.neu-v6-router`，目录 `/usr/local/{libexec,etc,var}/neu-v6-router`。面板地址 `http://127.0.0.1:9090/ui`。
-
-## 通用版改动后
-
-先对比新旧配置再 `./update.sh`：
+切换线路、加规则都在面板里，不用运行脚本。通用版改动后想先看看配置差别：
 
 ```bash
 node ../cli.js -c profile.yaml -c config.local.yaml -p mac -o /tmp/x
@@ -30,13 +46,19 @@ node ../cli.js -c profile.yaml -c config.local.yaml -p mac -o /tmp/x
 
 ## Windows
 
-克隆本仓库，把 Mac 上的 `personal/config.local.yaml` 拷到同一位置（`servers.local.sh` 只给 Mac 测速脚本用，不需要），然后在 `personal\` 里：
+1. 克隆仓库：`git clone https://github.com/Concrise/neu-v6-free.git`
+2. 把 Mac 上的 `personal/config.local.yaml` 拷到 Windows 上同一位置（`servers.local.sh` 只给 Mac 测速脚本用，不需要）。
+3. 在 `personal\` 里生成：
 
-```powershell
-node ..\cli.js -c profile.yaml -c config.local.yaml -p windows -o out
-```
+   ```powershell
+   node ..\cli.js -c profile.yaml -c config.local.yaml -p windows -o out
+   ```
 
-得到 `out\windows\config.json` 和 `out\windows\panel`，用法见上一级 README 的 Windows 一节。
+4. 第一次：先退出 v2rayN / Clash，在 `out\windows\install.ps1` 上右键 →「使用 PowerShell 运行」，管理员确认点「是」。
+   装到 `C:\neu-v6-free`，开机自启，面板同样是 `http://127.0.0.1:9090/ui`。
+5. 以后改了设置：重新生成，运行 `out\windows\update.ps1`（不需要管理员）。
+
+注意 `profile.yaml` 里的 `rules_dir` / `panel_dir` 是 Mac 的路径，Windows 用的是 `windows_rules_dir` / `windows_panel_dir`（默认 `C:/neu-v6-free/…`），互不影响。
 
 ## 和服务器的关系
 

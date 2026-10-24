@@ -1,0 +1,5 @@
+root = true
+
+[*.ps1]
+# Windows 自带的 PowerShell 5.1 只认带 BOM 的 UTF-8，否则中文会乱码
+charset = utf-8-bom

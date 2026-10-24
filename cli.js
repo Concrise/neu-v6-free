@@ -2,7 +2,8 @@
 // 命令行生成器。用法：
 //   node cli.js -c config.yaml [-c more.yaml ...] [-p mac,windows,android,ios] [-o out] [--sub-file sub.yaml] [--no-tun]
 // 多个 -c 依次合并（后面的覆盖前面的同名项），方便把「可以入库的设置」和「含密钥的设置」分开放。
-// 输出 <out>/<平台>/config.json；mac/windows 另带 panel/（面板），mac 另带 rules/（本地规则集）。
+// 输出 <out>/<平台>/config.json；mac/windows 另带 panel/（面板）和 rules/（本地规则集与「我的规则」空文件），
+// mac 另带 helper.py，windows 另带 install.ps1 / update.ps1 / uninstall.ps1 / helper.ps1。
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,7 @@ import yaml from "./lib/js-yaml.mjs";
 import { PLATFORMS, build, rsTag, ruleSetRefs, ruleSetUrl, DEFAULTS } from "./lib/build.js";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const EMPTY_RULE_SET = JSON.stringify({ version: 2, rules: [] }) + "\n";
 
 function parseArgs(argv) {
   const a = { configs: [], platforms: ["mac"], out: "out", subFile: null, tun: true };
@@ -35,9 +37,9 @@ async function fetchText(url, ua = "clash.meta") {
 }
 
 /** 规则集下载到 dest；某个失败时保留旧文件，没有旧文件则报错。 */
-async function downloadRuleSets(base, dest) {
+async function downloadRuleSets(base, dest, settings) {
   fs.mkdirSync(dest, { recursive: true });
-  for (const ref of ruleSetRefs()) {
+  for (const ref of ruleSetRefs("mac", settings)) {
     const target = path.join(dest, `${rsTag(ref)}.srs`);
     try {
       const r = await fetch(ruleSetUrl(base, ref), { signal: AbortSignal.timeout(60000) });
@@ -80,7 +82,21 @@ async function main() {
       fs.copyFileSync(path.join(ROOT, "panel", "index.html"), path.join(pd, "index.html"));
       fs.writeFileSync(path.join(pd, "groups.json"), JSON.stringify(panel, null, 1));
     }
-    if (platform === "mac") await downloadRuleSets(settings.rule_set_base || DEFAULTS.rule_set_base, path.join(dir, "rules"));
+    if (platform === "mac" || platform === "windows") {
+      await downloadRuleSets(settings.rule_set_base || DEFAULTS.rule_set_base, path.join(dir, "rules"), settings);
+    }
+    // 「我的规则」的空文件：安装 / 更新脚本只补缺的，不会覆盖已经加过的规则
+    const userSets = config.route.rule_set.filter((r) => r.tag.startsWith("user-"));
+    if (userSets.length) {
+      const rd = path.join(dir, "rules");
+      fs.mkdirSync(rd, { recursive: true });
+      for (const r of userSets) fs.writeFileSync(path.join(rd, `${r.tag}.json`), EMPTY_RULE_SET);
+    }
+    // 本地助手（以及 windows 的安装 / 更新 / 卸载脚本）一起放进去：更新时助手顺便升级自己
+    if (platform === "mac") fs.copyFileSync(path.join(ROOT, "mac", "helper.py"), path.join(dir, "helper.py"));
+    if (platform === "windows") {
+      for (const f of fs.readdirSync(path.join(ROOT, "windows"))) fs.copyFileSync(path.join(ROOT, "windows", f), path.join(dir, f));
+    }
     const groups = config.outbounds.filter((o) => o.type === "selector").length;
     console.log(`已生成 ${cfgPath}（${mode === "tunnel" ? "模式二·自带服务器" : "模式一·v6 优先直连"}，${config.outbounds.length} 个出站、${groups} 个分组）`);
   }

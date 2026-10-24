@@ -108,8 +108,10 @@
       <summary>怎么导入</summary>
       <ol>
         <li><b>Android / iOS / macOS</b>：装 sing-box 官方 App，新建配置 → 本地 → 选下载的 json 文件。</li>
-        <li><b>Windows</b>：把 zip 解压到 <code>C:\</code>，得到 <code>C:\neu-v6-free</code>。在 v2rayN 里「添加自定义配置」，选其中的 <code>config.json</code>，内核选 sing-box，以管理员身份运行（TUN 需要）。分组面板：<code>http://127.0.0.1:9090/ui</code>。</li>
-        <li><b>macOS 想开机常驻、带网页面板</b>：用命令行版（<code>node cli.js -p mac</code> + <code>mac/install.sh</code>）。</li>
+        <li><b>Windows</b>：先退出 v2rayN、Clash 等代理软件，解压 zip，在 <code>install.ps1</code> 上右键 →「使用 PowerShell 运行」，点一次「是」（只有第一次安装需要管理员）。
+          它会装到 <code>C:\neu-v6-free</code>、下载 sing-box 并设成开机自启。面板：<code>http://127.0.0.1:9090/ui</code>。
+          以后改了设置：重新下载 zip，解压后运行里面的 <code>update.ps1</code>（不需要管理员）。</li>
+        <li><b>macOS 想开机常驻、带网页面板和「我的规则」</b>：用命令行版（<code>node cli.js -p mac</code> + <code>sudo mac/install.sh</code>），见仓库 README。</li>
       </ol>
       <p class="hint">生成的文件里有节点密码，不要发到群里。离开校园网（没有 IPv6）时，模式二在「免流服务器」里选「不用服务器（离校时选）」。</p>
     </details>
