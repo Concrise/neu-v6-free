@@ -139,3 +139,7 @@ personal/           作者自用的配置（可以当填写示例参考）
 - 面板和本地助手只监听 `127.0.0.1`，都要求面板密钥；本地助手只接受面板页面的跨域请求，更新接口不接受任何网页发来的请求。
 - 本地助手以管理员身份运行。它安装新配置前会检查配置里所有文件路径都在安装目录内，并用 `sing-box check` 验证，不通过就不动旧配置。
 - 规则集来自 [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat)。
+
+## 许可证
+
+[MIT](LICENSE)
