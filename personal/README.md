@@ -22,7 +22,7 @@ sudo ./uninstall.sh      # 卸载，之后可重新打开 FlClash / v2rayN
 ## 更新通用版核心
 
 ```bash
-git -C core pull                 # core 指向本地 ~/Dev/neu-v6-free；推到 GitHub 后改 .gitmodules 的 url
+git -C core pull                 # core 指向 GitHub 的 Concrise/neu-v6-free：先在 ~/Dev/neu-v6-free 提交并 push
 git add core && git commit -m "更新 core"
 ```
 
