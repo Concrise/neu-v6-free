@@ -1,0 +1,4 @@
+config.local.yaml
+out/
+__pycache__/
+*.local.sh
