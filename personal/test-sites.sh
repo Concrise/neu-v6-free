@@ -6,7 +6,7 @@ set -u
 cd "$(dirname "$0")"
 SB=/usr/local/libexec/neu-v6-router/sing-box
 T=$(mktemp -d /tmp/neu-sites.XXXXXX); trap 'kill $PID 2>/dev/null; rm -rf "$T"' EXIT
-[ -f out/mac/config.json ] || node core/cli.js -c profile.yaml -c config.local.yaml -p mac -o out >/dev/null
+[ -f out/mac/config.json ] || node ../cli.js -c profile.yaml -c config.local.yaml -p mac -o out >/dev/null
 python3 - "$T" <<'PY'
 import json, os, sys
 T = sys.argv[1]; c = json.load(open("out/mac/config.json"))

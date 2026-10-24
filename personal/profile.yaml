@@ -1,5 +1,5 @@
 # 自用设置（可入库，不含密钥与服务器 IP）。密钥、订阅链接、服务器 IP 在 config.local.yaml。
-# 生成：node core/cli.js -c profile.yaml -c config.local.yaml -p mac  （./update.sh 会自动做）
+# 生成：node ../cli.js -c profile.yaml -c config.local.yaml -p mac  （./update.sh 会自动做）
 # entry_servers（服务器 IP）放在 config.local.yaml：港机在前（默认入口）、Netcup 在后（也当落地）
 default_landing: "🇺🇸 家宽Sixtynet"
 hy2_brutal: {up_mbps: 30, down_mbps: 100}

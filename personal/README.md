@@ -1,6 +1,6 @@
-# neu-v6-router（自用）
+# 自用配置
 
-东大校园网 IPv6 免流的自用配置。生成逻辑全部来自通用版 [neu-v6-free](core/)（git 子模块 `core/`），这里只放个人的东西。
+东大校园网 IPv6 免流的自用配置（原 neu-v6-router 仓库）。生成逻辑全部来自上一级目录的通用版，这里只放个人的东西。以下命令都在 `personal/` 里运行。
 
 | 文件 | 内容 | 入库 |
 |---|---|---|
@@ -20,18 +20,23 @@ sudo ./uninstall.sh      # 卸载，之后可重新打开 FlClash / v2rayN
 
 服务沿用旧名字：LaunchDaemon `com.nk.neu-v6-router`，目录 `/usr/local/{libexec,etc,var}/neu-v6-router`。面板地址 `http://127.0.0.1:9090/ui`。
 
-## 更新通用版核心
+## 通用版改动后
+
+先对比新旧配置再 `./update.sh`：
 
 ```bash
-git -C core pull                 # core 指向 GitHub 的 Concrise/neu-v6-free：先在 ~/Dev/neu-v6-free 提交并 push
-git add core && git commit -m "更新 core"
+node ../cli.js -c profile.yaml -c config.local.yaml -p mac -o /tmp/x
 ```
 
-通用版改动后，先对比新旧配置再 `./update.sh`：
+## Windows
 
-```bash
-node core/cli.js -c profile.yaml -c config.local.yaml -p mac -o /tmp/x
+克隆本仓库，把 Mac 上的 `personal/config.local.yaml` 拷到同一位置（`servers.local.sh` 只给 Mac 测速脚本用，不需要），然后在 `personal\` 里：
+
+```powershell
+node ..\cli.js -c profile.yaml -c config.local.yaml -p windows -o out
 ```
+
+得到 `out\windows\config.json` 和 `out\windows\panel`，用法见上一级 README 的 Windows 一节。
 
 ## 和服务器的关系
 
