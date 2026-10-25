@@ -5,6 +5,10 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net48</TargetFramework>
+    <!-- 明确写 AnyCPU：不写的话在 Windows 上编译会默认按 32 位处理，只带 32 位的 WebView2Loader.dll，
+         64 位进程就找不到加载库。写了就带齐 runtimes\win-x64、win-arm64、win-x86 三份，按进程位数加载 -->
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
     <LangVersion>latest</LangVersion>
     <AssemblyName>neu-v6-free</AssemblyName>
     <RootNamespace>NeuV6Free</RootNamespace>

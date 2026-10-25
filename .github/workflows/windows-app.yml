@@ -30,6 +30,12 @@ jobs:
           Get-ChildItem out/app -Recurse -File | ForEach-Object { "{0,10:N0}  {1}" -f $_.Length, $_.FullName.Substring((Resolve-Path out/app).Path.Length + 1) }
           $pv = (Get-Item out/app/neu-v6-free.exe).VersionInfo.ProductVersion
           if ($pv -ne $v) { throw "exe 的版本是 $pv，应该是 $v" }
+          foreach ($a in 'x64', 'arm64', 'x86') {
+            if (-not (Test-Path "out/app/runtimes/win-$a/native/WebView2Loader.dll")) { throw "缺少 $a 的 WebView2Loader.dll" }
+          }
+          # 要是 AnyCPU（64 位系统上以 64 位运行）：PE 头里是 I386 且 CLR 头没有「要求 32 位」标记
+          $asm = [Reflection.AssemblyName]::GetAssemblyName((Resolve-Path out/app/neu-v6-free.exe).Path)
+          if ($asm.ProcessorArchitecture -ne 'MSIL') { throw "exe 不是 AnyCPU：$($asm.ProcessorArchitecture)" }
 
       - uses: actions/upload-artifact@v7
         with:
