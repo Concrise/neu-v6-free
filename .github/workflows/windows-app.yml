@@ -23,7 +23,7 @@ jobs:
         run: windows/app/make-icon.ps1 windows/app/app.ico
 
       - name: 编译
-        shell: pwsh
+        shell: powershell  # 5.1（.NET Framework）：下面读 exe 的 ProcessorArchitecture 在 pwsh 里恒为 None
         run: |
           $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
           dotnet publish windows/app/NeuV6Free.csproj -c Release -o out/app "-p:Version=$v"
@@ -33,7 +33,7 @@ jobs:
           foreach ($a in 'x64', 'arm64', 'x86') {
             if (-not (Test-Path "out/app/runtimes/win-$a/native/WebView2Loader.dll")) { throw "缺少 $a 的 WebView2Loader.dll" }
           }
-          # 要是 AnyCPU（64 位系统上以 64 位运行）：PE 头里是 I386 且 CLR 头没有「要求 32 位」标记
+          # 要是 AnyCPU（MSIL）：64 位系统上以 64 位运行，ARM64 上以 ARM64 运行
           $asm = [Reflection.AssemblyName]::GetAssemblyName((Resolve-Path out/app/neu-v6-free.exe).Path)
           if ($asm.ProcessorArchitecture -ne 'MSIL') { throw "exe 不是 AnyCPU：$($asm.ProcessorArchitecture)" }
 
