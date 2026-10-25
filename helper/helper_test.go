@@ -3,9 +3,14 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestNormalizeRule(t *testing.T) {
@@ -102,6 +107,143 @@ func TestClassify(t *testing.T) {
 		if got := classify(c, x.conn, nil); got != x.want {
 			t.Errorf("classify(%v) = %v，应该是 %v", x.conn, got, x.want)
 		}
+	}
+}
+
+func TestTrafficSite(t *testing.T) {
+	for _, c := range []struct{ host, ip, want string }{
+		{"WWW.Example.COM.", "", "example.com"},
+		{"video.example.co.uk", "", "example.co.uk"},
+		{"a.foo.github.io", "", "foo.github.io"},
+		{"www.中文.com", "", "xn--fiq228c.com"},
+		{"", "192.0.2.10", "192.0.2.10"},
+		{"[2001:db8::1]", "", "2001:db8::1"},
+		{"::ffff:192.0.2.10", "", "192.0.2.10"},
+		{"localhost", "192.0.2.11", "192.0.2.11"},
+		{"https://example.com/private", "192.0.2.12", "192.0.2.12"},
+		{"bad domain!", "", ""},
+		{"", "", ""},
+	} {
+		if got := trafficSite(obj{"host": c.host, "destinationIP": c.ip}); got != c.want {
+			t.Errorf("trafficSite(%q, %q) = %q，应该是 %q", c.host, c.ip, got, c.want)
+		}
+	}
+}
+
+func TestTrafficSitesUpgrade(t *testing.T) {
+	h := &Helper{p: Paths{Var: t.TempDir()}}
+	month := time.Now().Format("2006-01")
+	old := trafficState{Since: "2025-01-01T00:00:00", Months: map[string]*bucket{month: {V6: 1000, Server: map[string]float64{"演示": 300}}}}
+	if err := writeAtomic(h.p.Traffic(), marshal(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr := newTraffic(h)
+	tr.addSites(month, map[string]map[string]float64{"v6": {"example.com": 100}})
+	data, err := tr.sitesView("v6", month)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view struct {
+		Total float64
+		Items []siteItem
+		Since string
+	}
+	if err := json.Unmarshal(data, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Total != 1000 || len(view.Items) != 1 || view.Items[0].Bytes != 100 || view.Since == "" {
+		t.Fatalf("升级前总量和新增网站明细应分开保留：%s", data)
+	}
+	if bytes.Contains(tr.view(), []byte("example.com")) || bytes.Contains(tr.view(), []byte("sites")) {
+		t.Fatal("公开的 /traffic 泄露了网站明细")
+	}
+	tr.save()
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(h.p.Traffic())
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("网站明细应为 600：%v", err)
+		}
+	}
+	reloaded := newTraffic(h)
+	if reloaded.state.SitesSince != tr.state.SitesSince || reloaded.state.Sites[month]["v6"]["example.com"] != 100 || reloaded.state.Since != old.Since {
+		t.Fatal("重启后应保留原统计及网站明细")
+	}
+}
+
+func TestTrafficSitesLimits(t *testing.T) {
+	h := &Helper{p: Paths{Var: t.TempDir()}}
+	tr := newTraffic(h)
+	now := time.Now()
+	month := now.Format("2006-01")
+	sites := map[string]float64{}
+	var total float64
+	for i := 1; i <= 801; i++ {
+		sites[fmt.Sprintf("s%d.example", i)] = float64(i)
+		total += float64(i)
+	}
+	tr.addSites(month, map[string]map[string]float64{"server": sites})
+	tr.state.Months[month] = &bucket{Server: map[string]float64{"演示一": total - 1, "演示二": 1}}
+	first := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	old := first.AddDate(0, -3, 0).Format("2006-01")
+	keep := first.AddDate(0, -2, 0).Format("2006-01")
+	tr.addSites(old, map[string]map[string]float64{"v6": {"old.example": 1}})
+	tr.addSites(keep, map[string]map[string]float64{"v6": {"keep.example": 1}})
+	tr.trimSites(now)
+	if len(tr.state.Sites[month]["server"]) != 401 || tr.state.Sites[old] != nil || tr.state.Sites[keep] == nil {
+		t.Fatal("网站数量或保留月份不对")
+	}
+	var sum float64
+	for _, n := range tr.state.Sites[month]["server"] {
+		sum += n
+	}
+	if sum != total {
+		t.Fatal("合并小网站丢失了流量")
+	}
+	data, err := tr.sitesView("server", month)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view struct {
+		Items []siteItem
+		Total float64
+	}
+	json.Unmarshal(data, &view)
+	if len(view.Items) != 100 || view.Items[0].Bytes != 801 || view.Total != total {
+		t.Fatalf("排名应为前 100，服务器合计应一致：%s", data)
+	}
+}
+
+func TestTrafficSitesAuthorization(t *testing.T) {
+	h := &Helper{p: Paths{Var: t.TempDir()}}
+	c := &Conf{Secret: "test-only", Origins: map[string]bool{"http://127.0.0.1:29090": true}}
+	h.cur.Store(c)
+	h.traffic = newTraffic(h)
+	for _, tc := range []struct {
+		auth, origin, query string
+		code                int
+	}{
+		{"", "", "kind=v6", 401},
+		{"Bearer wrong", "", "kind=v6", 401},
+		{"Bearer test-only", "https://example.com", "kind=v6", 401},
+		{"Bearer test-only", "http://127.0.0.1:29090", "kind=v6", 200},
+		{"Bearer test-only", "", "kind=other", 400},
+		{"Bearer test-only", "", "kind=v4&month=2026-13", 400},
+		{"Bearer test-only", "", "kind=server&month=2026-01", 200},
+	} {
+		r := httptest.NewRequest("GET", "/traffic/sites?"+tc.query, nil)
+		r.Header.Set("Authorization", tc.auth)
+		r.Header.Set("Origin", tc.origin)
+		w := httptest.NewRecorder()
+		h.handle(w, r)
+		if w.Code != tc.code || w.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("%+v：返回 %d", tc, w.Code)
+		}
+	}
+	c.Secret = ""
+	w := httptest.NewRecorder()
+	h.handle(w, httptest.NewRequest("GET", "/traffic/sites?kind=v6", nil))
+	if w.Code != 401 {
+		t.Fatal("没有设置密钥时也不能公开网站明细")
 	}
 }
 

@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/netip"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/idna"
+	"golang.org/x/net/publicsuffix"
 )
 
 // 流量统计（/traffic）：每秒读一次 Clash API 的 /connections，按每条连接的实际出口记账：
@@ -49,9 +53,11 @@ func (b *bucket) add(k kindKey, n float64) {
 type kindKey struct{ kind, srv string }
 
 type trafficState struct {
-	Since  string             `json:"since"`
-	Months map[string]*bucket `json:"months"`
-	Days   map[string]*bucket `json:"days"`
+	Since      string                                   `json:"since"`
+	Months     map[string]*bucket                       `json:"months"`
+	Days       map[string]*bucket                       `json:"days"`
+	Sites      map[string]map[string]map[string]float64 `json:"sites,omitempty"`
+	SitesSince string                                   `json:"sites_since,omitempty"`
 }
 
 type Traffic struct {
@@ -73,6 +79,13 @@ func newTraffic(h *Helper) *Traffic {
 	if t.state.Days == nil {
 		t.state.Days = map[string]*bucket{}
 	}
+	if t.state.Sites == nil {
+		t.state.Sites = map[string]map[string]map[string]float64{}
+	}
+	if t.state.SitesSince == "" {
+		t.state.SitesSince = stamp()
+	}
+	t.trimSites(time.Now())
 	for _, m := range []map[string]*bucket{t.state.Months, t.state.Days} {
 		for k, b := range m {
 			if b == nil {
@@ -96,9 +109,134 @@ func (t *Traffic) save() {
 	t.mu.Lock()
 	data := marshal(t.state)
 	t.mu.Unlock()
-	if err := writeAtomic(t.h.p.Traffic(), data, 0o644); err != nil {
+	// Windows 不认 Unix mode：先收紧临时文件的 ACL，再把网站明细写进去。
+	f, err := os.OpenFile(t.h.p.Traffic()+".tmp", os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		logf("保存流量统计失败：%v", err)
+		return
+	}
+	f.Close()
+	protect(t.h.p.Traffic() + ".tmp")
+	if err := writeAtomic(t.h.p.Traffic(), data, 0o600); err != nil {
 		logf("保存流量统计失败：%v", err)
 	}
+}
+
+const otherSites = "（其他）"
+
+type siteItem struct {
+	Site  string  `json:"site"`
+	Bytes float64 `json:"bytes"`
+}
+
+// 主域名合并子域名；没有可用域名时记目标 IP，不保存 URL、路径或端口。
+func trafficSite(m obj) string {
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(getStr(m, "host"))), ".")
+	if ip, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
+		return ip.Unmap().String()
+	}
+	if host != "" && len(host) <= 253 {
+		if ascii, err := idna.Lookup.ToASCII(host); err == nil {
+			if site, err := publicsuffix.EffectiveTLDPlusOne(ascii); err == nil {
+				return site
+			}
+		}
+	}
+	if ip, err := netip.ParseAddr(getStr(m, "destinationIP")); err == nil {
+		return ip.Unmap().String()
+	}
+	return ""
+}
+
+func sortedSites(sites map[string]float64) []siteItem {
+	items := make([]siteItem, 0, len(sites))
+	for site, n := range sites {
+		if site != otherSites && n > 0 {
+			items = append(items, siteItem{site, n})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Bytes == items[j].Bytes {
+			return items[i].Site < items[j].Site
+		}
+		return items[i].Bytes > items[j].Bytes
+	})
+	return items
+}
+
+// 调用方持有 mu。只留本月和前两个月；小网站合并后仍保留其字节数。
+func (t *Traffic) trimSites(now time.Time) {
+	first := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, -2, 0).Format("2006-01")
+	for month, kinds := range t.state.Sites {
+		if month < first || month > now.Format("2006-01") {
+			delete(t.state.Sites, month)
+			continue
+		}
+		for _, sites := range kinds {
+			if len(sites) > 800 {
+				items := sortedSites(sites)
+				for _, item := range items[min(400, len(items)):] {
+					sites[otherSites] += item.Bytes
+					delete(sites, item.Site)
+				}
+			}
+		}
+	}
+}
+
+// 网站仅累加采样时能明确归属的流量；关闭连接的尾差留在排名页的「其他」中。
+func (t *Traffic) addSites(month string, deltas map[string]map[string]float64) {
+	if len(deltas) == 0 {
+		return
+	}
+	if t.state.Sites[month] == nil {
+		t.state.Sites[month] = map[string]map[string]float64{}
+	}
+	for kind, sites := range deltas {
+		if t.state.Sites[month][kind] == nil {
+			t.state.Sites[month][kind] = map[string]float64{}
+		}
+		for site, n := range sites {
+			t.state.Sites[month][kind][site] += n
+		}
+	}
+}
+
+func (t *Traffic) sitesView(kind, month string) ([]byte, error) {
+	if kind != "v6" && kind != "server" && kind != "v4" {
+		return nil, bad("流量类型应为 v6、server 或 v4")
+	}
+	if month == "" {
+		month = time.Now().Format("2006-01")
+	}
+	if _, err := time.Parse("2006-01", month); err != nil {
+		return nil, bad("月份应为 YYYY-MM")
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var total float64
+	if b := t.state.Months[month]; b != nil {
+		switch kind {
+		case "v6":
+			total = b.V6
+		case "v4":
+			total = b.V4
+		case "server":
+			for _, n := range b.Server {
+				total += n
+			}
+		}
+	}
+	items := sortedSites(t.state.Sites[month][kind])
+	if len(items) > 100 {
+		items = items[:100]
+	}
+	months := make([]string, 0, len(t.state.Sites))
+	for m := range t.state.Sites {
+		months = append(months, m)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(months)))
+	return marshal(obj{"month": month, "kind": kind, "total": total, "items": items, "months": months, "since": t.state.SitesSince}), nil
 }
 
 // 出口 tag → kindKey{"server", 服务器名} / {"v6"} / {"v4"} / {"direct", 解析策略} / {"other"}
@@ -236,6 +374,7 @@ func (t *Traffic) run() {
 			total := getNum(d, "downloadTotal") + getNum(d, "uploadTotal")
 			cur := map[string]float64{}
 			deltas := map[kindKey]float64{}
+			sites := map[string]map[string]float64{}
 			for _, x := range getList(d, "connections") {
 				conn, _ := x.(map[string]any)
 				n := getNum(conn, "upload") + getNum(conn, "download")
@@ -249,7 +388,16 @@ func (t *Traffic) run() {
 					delta = n
 				}
 				if delta > 0 {
-					deltas[classify(c, conn, now)] += delta
+					k := classify(c, conn, now)
+					deltas[k] += delta
+					if k.kind == "v6" || k.kind == "server" || k.kind == "v4" {
+						if site := trafficSite(getObj(conn, "metadata")); site != "" {
+							if sites[k.kind] == nil {
+								sites[k.kind] = map[string]float64{}
+							}
+							sites[k.kind][site] += delta
+						}
+					}
 				}
 			}
 			if lastTotal >= 0 && total >= lastTotal {
@@ -286,6 +434,8 @@ func (t *Traffic) run() {
 			st := time.Now()
 			mk, dk := st.Format("2006-01"), st.Format("2006-01-02")
 			t.mu.Lock()
+			t.addSites(mk, sites)
+			t.trimSites(st)
 			mb, db := t.state.Months[mk], t.state.Days[dk]
 			if mb == nil {
 				mb = newBucket()

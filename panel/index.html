@@ -146,6 +146,17 @@
   .stat .v.free { color: var(--free); }
   .stat .v.paid { color: var(--paid); }
   .stat .v.srv { color: var(--accent); }
+  a.stat { color: var(--text); }
+  a.stat:hover { text-decoration: none; border-color: var(--accent); box-shadow: var(--lift); }
+  a.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .stat .more { color: var(--accent); white-space: nowrap; }
+  .site-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 20px; border-top: 1px solid var(--line); }
+  .site-row:first-child { border-top: 0; }
+  .site-name { overflow-wrap: anywhere; font-weight: 550; }
+  .site-track { height: 5px; background: var(--sunken); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+  .site-track i { display: block; height: 100%; border-radius: inherit; background: var(--site-color); }
+  .site-size { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .site-size small { display: block; color: var(--muted); }
   .bars { display: flex; align-items: flex-end; justify-content: space-around; gap: 12px; height: 64px; }
   .bars div { flex: 1 1 0; max-width: 72px; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; height: 64px; }
   .bars i { display: block; border-radius: 3px; }
@@ -348,7 +359,7 @@ const ICON = {
 const icon = (k) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
 // 菜单只有四项；实时连接、流量、日志、固定端口、常见问题从「设置 → 诊断」进，分组详情从「线路与规则」进
 const PAGES = [["home", "概览"], ["routes", "线路与规则"], ["subs", "订阅与节点"], ["settings", "设置"]];
-const SUBPAGES = { group: "routes", conn: "settings", traffic: "settings", ports: "settings", logs: "settings", help: "settings", welcome: "" };
+const SUBPAGES = { sites: "home", group: "routes", conn: "settings", traffic: "settings", ports: "settings", logs: "settings", help: "settings", welcome: "" };
 const OLD_PAGES = { groups: "routes", rules: "routes" };  // 以前的地址
 
 function route() {
@@ -393,7 +404,7 @@ function render() {
   m.innerHTML = "";
   m.classList.toggle("narrow", page === "welcome");
   if (prof()?.pending && page !== "welcome") m.append(pendingBar());
-  ({ home: renderHome, routes: renderRoutes, group: () => renderGroup(arg), conn: renderConn, traffic: renderTraffic, ports: renderPorts,
+  ({ home: renderHome, sites: () => renderSites(arg), routes: renderRoutes, group: () => renderGroup(arg), conn: renderConn, traffic: renderTraffic, ports: renderPorts,
     help: renderHelp, subs: renderSubs, settings: renderSettings, logs: renderLogs, welcome: renderWelcome })[page]();
   window.scrollTo(0, 0);
 }
@@ -434,7 +445,7 @@ function renderHome() {
 
   if (helper.traffic) {
     // 省下的分开算：走 IPv6 直连的（模式一、二都有）和经自己的服务器的（模式二）
-    const card = (cls, k, s) => `<div class="card stat ${cls}"><div class="k">${k}</div><div class="v ${cls}">—</div><div class="s">${s}</div></div>`;
+    const card = (cls, k, s) => `<a class="card stat ${cls}" href="#/sites/${{ free: "v6", srv: "server", paid: "v4" }[cls]}"><div class="k"><span>${k}</span><span class="more">看排名 ›</span></div><div class="v ${cls}">—</div><div class="s">${s}</div></a>`;
     const stats = $(`<div class="sec" style="gap:16px"><div class="stats">
       ${card("free", "本月走 IPv6 省下", "有 IPv6 的网站直接走 IPv6，不计费")}
       ${tunnel ? card("srv", "本月经服务器省下", "只有 IPv4 的网站经你的服务器出去，不计费") : ""}
@@ -1128,6 +1139,49 @@ function ruleFromConn(c, all) {
 const gb = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(b >= 10737418240 ? 1 : 2) + " G" : (b / 1048576).toFixed(b >= 104857600 ? 0 : 1) + " M";
 const rateFmt = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + " MB/s" : (b / 1024).toFixed(0) + " KB/s";
 const srvSum = (b) => Object.values(b.server || {}).reduce((x, y) => x + y, 0);
+
+// ---------- 网站流量排名 ----------
+function renderSites(kind) {
+  const types = { v6: ["走 IPv6 省下", "--free"], server: ["经服务器省下", "--accent"], v4: ["计费流量", "--paid"] };
+  const m = main(), type = types[kind];
+  if (!type) { m.append(head("网站流量排名", "请从概览中的流量卡片进入。", ["home", "概览"])); return; }
+  m.append(head(type[0] + " · 网站排名", "按主域名合并，上下行合计；没有域名的连接显示目标 IP。占比以该类当月总流量计算。", ["home", "概览"]));
+  const controls = $(`<div class="row"><label for="site-month">月份</label><select id="site-month" aria-label="月份"></select><span class="hint">保留最近 3 个月的网站明细</span></div>`);
+  const box = $(`<div class="sec" style="--site-color:var(${type[1]})"><div class="hint">读取中……</div></div>`);
+  m.append(controls, box);
+  const select = controls.querySelector("select"), now = new Date();
+  const current = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  let month = current, loading = false;
+  select.append(new Option(current, current));
+  const pct = (n, total) => total > 0 ? Math.min(100, n / total * 100) : 0;
+  const tick = async () => {
+    if (loading) return;
+    loading = true;
+    const requested = month;
+    try {
+      const d = await helperApi(`/traffic/sites?kind=${kind}&month=${encodeURIComponent(requested)}`);
+      if (!box.isConnected || month !== requested) return;
+      const months = [...new Set([current, requested, ...d.months])].sort().reverse();
+      select.replaceChildren(...months.map((key) => new Option(key, key, false, key === month)));
+      const sum = d.items.reduce((n, item) => n + item.bytes, 0), rest = Math.max(0, d.total - sum);
+      const row = (rank, site, n) => `<div class="site-row"><span class="muted small">${rank}</span><div><div class="site-name">${esc(site)}</div>
+        <div class="site-track"><i style="width:${pct(n, d.total)}%"></i></div></div><div class="site-size">${gb(n)}B<small>${pct(n, d.total).toFixed(1)}%</small></div></div>`;
+      box.innerHTML = `<div class="card stat"><div class="k">${esc(month)} · ${type[0]}</div><div class="v" style="color:var(${type[1]})">${bigSize(d.total)}</div><div class="s">网站排名前 100 名</div></div>
+        ${d.items.length || rest > 0 ? `<div class="list">${d.items.map((item, i) => row(i + 1, item.site, item.bytes)).join("")}
+          ${rest > 0 ? row("—", "其他 / 未按网站记录的流量", rest) : ""}</div>` : `<div class="card muted">这个月还没有这类网站流量。</div>`}
+        <p class="hint">从 ${esc(String(d.since).replace("T", " "))} 起按网站记录。升级前的流量、未进入前 100 名的网站，以及采样之间已关闭、无法归属的连接，合并在「其他 / 未按网站记录的流量」中。
+        明细只保存在这台电脑上，查看需要面板密钥。</p>`;
+    } catch (e) {
+      if (!box.isConnected || month !== requested) return;
+      box.innerHTML = e.message === "not found" || e.message === "HTTP 404"
+        ? `<div class="note warn">本地助手还不支持网站排名，请在<a href="#/settings">设置</a>中更新客户端。</div>`
+        : `<div class="note err">读取网站排名失败：${esc(e.message)}。${esc(helperHelp())}</div>`;
+    } finally { loading = false; }
+  };
+  select.onchange = () => { month = select.value; box.innerHTML = `<div class="hint">读取中……</div>`; tick(); };
+  tick();
+  timer = setInterval(tick, 2000);
+}
 
 function renderTraffic() {
   const m = main();

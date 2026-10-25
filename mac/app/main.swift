@@ -6,6 +6,51 @@ import AppKit
 import ServiceManagement
 import WebKit
 
+// WKWebView 自己接收鼠标事件，不能靠 isMovableByWindowBackground 拖动窗口。
+// 顶部覆盖一条原生视图，把拖动交还给系统；红黄绿按钮仍由 NSWindow 处理。
+final class WindowDragArea: NSView {
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 { window?.performZoom(nil) }
+        else { window?.performDrag(with: event) }
+    }
+}
+
+let titleBarScript = """
+    (() => {
+      const init = () => {
+        document.documentElement.classList.add('mac-titlebar');
+        const st = document.createElement('style');
+        st.textContent = `
+          html.mac-titlebar body { padding-top: 32px !important; box-sizing: border-box; }
+          html.mac-titlebar .app { min-height: calc(100vh - 32px) !important; }
+          @media (min-width: 861px) { html.mac-titlebar nav { top: 32px !important; height: calc(100vh - 32px) !important; } }
+          #mac-titlebar { position: fixed; top: 0; left: 0; right: 0; height: 32px; z-index: 2147483000; pointer-events: none; }
+        `;
+        document.head.append(st);
+        const bar = document.createElement('div');
+        bar.id = 'mac-titlebar';
+        document.body.append(bar);
+        let queued = false;
+        const paint = () => {
+          queued = false;
+          let bg = getComputedStyle(document.body).backgroundColor;
+          if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = 'Canvas';
+          const nav = document.querySelector('.app:not(.bare) > nav');
+          if (nav && nav.offsetHeight > innerHeight / 2) {
+            const n = getComputedStyle(nav), w = nav.offsetWidth;
+            bar.style.background = `linear-gradient(to right, ${n.backgroundColor} ${w - 1}px, ${n.borderRightColor} ${w - 1}px ${w}px, ${bg} ${w}px)`;
+          } else bar.style.background = nav ? getComputedStyle(nav).backgroundColor : bg;
+        };
+        const later = () => { if (!queued) { queued = true; requestAnimationFrame(paint); } };
+        new MutationObserver(later).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+        addEventListener('resize', later);
+        matchMedia('(prefers-color-scheme: dark)').addEventListener('change', later);
+        paint();
+      };
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+    })();
+    """
+
 let PANEL = URL(string: "http://127.0.0.1:9090/ui/")!
 let HELPER = URL(string: "http://127.0.0.1:9091/")!
 let SHOW_NOTE = Notification.Name("io.github.concrise.neu-v6-free.show")
@@ -309,6 +354,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
 
     func makeWindow() {
         let conf = WKWebViewConfiguration()
+        conf.userContentController.addUserScript(
+            WKUserScript(source: titleBarScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         // 面板（9090）和助手状态页（9091）各自从 localStorage 取密钥：每次都填文件里的，等于自动登录。
         // 不能只在没存时填：重新安装后密钥换了，存着的旧密钥会让面板先要密钥
         if let s = panelSecret(), let js = try? JSONSerialization.data(withJSONObject: [s]),
@@ -329,12 +376,24 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
 
         let w = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         w.title = "校园网 v6 免流"
+        w.titleVisibility = .hidden
+        w.titlebarAppearsTransparent = true
+        w.titlebarSeparatorStyle = .none
         w.minSize = NSSize(width: 720, height: 480)
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.contentView = web
+        let drag = WindowDragArea()
+        drag.translatesAutoresizingMaskIntoConstraints = false
+        web.addSubview(drag)
+        NSLayoutConstraint.activate([
+            drag.topAnchor.constraint(equalTo: web.topAnchor),
+            drag.leadingAnchor.constraint(equalTo: web.leadingAnchor, constant: 80),
+            drag.trailingAnchor.constraint(equalTo: web.trailingAnchor),
+            drag.heightAnchor.constraint(equalToConstant: 32),
+        ])
         w.center()
         w.setFrameAutosaveName("main")
         window = w

@@ -124,6 +124,19 @@ func (h *Helper) handle(w http.ResponseWriter, r *http.Request) {
 	case path == "/traffic" && m == "GET":
 		h.reply(w, r, 200, h.traffic.view())
 
+	case path == "/traffic/sites" && m == "GET":
+		w.Header().Set("Cache-Control", "no-store")
+		if c.Secret == "" || !h.authorized(r, false) {
+			h.reply(w, r, 401, obj{"error": "密钥不对"})
+			return
+		}
+		data, err := h.traffic.sitesView(r.URL.Query().Get("kind"), r.URL.Query().Get("month"))
+		if err != nil {
+			h.fail(w, r, err, "")
+			return
+		}
+		h.reply(w, r, 200, data)
+
 	case (path == "/pause" || path == "/resume") && m == "POST":
 		if !h.authorized(r, true) {
 			h.reply(w, r, 401, obj{"error": "密钥不对"})
