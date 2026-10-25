@@ -50,6 +50,7 @@ namespace NeuV6Free
             Directory.CreateDirectory(Data);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            PanelForm.AllowDarkMode();
             Application.Run(new App(show, args.Contains("--background")));
         }
 
@@ -414,6 +415,29 @@ code{font:13px Consolas,monospace}</style>
         // 页面自己按 prefers-color-scheme 换颜色（WebView2 跟着系统），但标题栏是 Windows 画的：要自己告诉它用深色
 
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+        // Windows 10 上只设 DWM 的属性不够（实测标题栏还是白的）：还要用 uxtheme 里没公开的函数允许程序和窗口用深色，
+        // 再用 SetWindowCompositionAttribute 告诉它标题栏用深色（做法同 github.com/ysc3839/win32-darkmode）
+        [DllImport("uxtheme.dll", EntryPoint = "#135")] static extern int SetPreferredAppMode(int mode);  // 1809 里是 AllowDarkModeForApp(bool)
+        [DllImport("uxtheme.dll", EntryPoint = "#133")] static extern bool AllowDarkModeForWindow(IntPtr hwnd, bool allow);
+        [DllImport("user32.dll")] static extern bool SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionData data);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool SetProp(IntPtr hwnd, string name, IntPtr data);
+        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wp, IntPtr lp);
+        [DllImport("ntdll.dll")] static extern void RtlGetNtVersionNumbers(out int major, out int minor, out int build);
+        [StructLayout(LayoutKind.Sequential)] struct WindowCompositionData { public int Attrib; public IntPtr Data; public IntPtr Size; }
+
+        /// <summary>Windows 的版本号（程序没有声明支持 Windows 10 时 Environment.OSVersion 报的是 6.2，不能用）</summary>
+        static readonly int Build = GetBuild();
+        static int GetBuild()
+        {
+            try { RtlGetNtVersionNumbers(out _, out _, out int b); return b & 0xFFFF; } catch { return 0; }
+        }
+
+        /// <summary>程序启动时调用一次（Windows 10 1809 起才有）</summary>
+        public static void AllowDarkMode()
+        {
+            if (Build < 17763) return;
+            try { SetPreferredAppMode(1); } catch { }  // 1 = AllowDark（1809 里是 true）
+        }
 
         /// <summary>「设置 → 个性化 → 颜色 → 选择默认应用模式」选了深色</summary>
         static bool SystemDark()
@@ -430,8 +454,32 @@ code{font:13px Consolas,monospace}</style>
         {
             bool dark = SystemDark();
             int on = dark ? 1 : 0;
+            if (Build >= 17763 && Build < 22000)
+            {
+                try
+                {
+                    AllowDarkModeForWindow(Handle, dark);
+                    if (Build < 18362) SetProp(Handle, "UseImmersiveDarkModeColors", (IntPtr)on);
+                    else
+                    {
+                        var mem = Marshal.AllocHGlobal(sizeof(int));
+                        Marshal.WriteInt32(mem, on);
+                        var data = new WindowCompositionData { Attrib = 26, Data = mem, Size = (IntPtr)sizeof(int) };  // 26 = WCA_USEDARKMODECOLORS
+                        SetWindowCompositionAttribute(Handle, ref data);
+                        Marshal.FreeHGlobal(mem);
+                    }
+                }
+                catch { }
+            }
             // 20 = DWMWA_USE_IMMERSIVE_DARK_MODE（Windows 10 20H1 起、Windows 11）；更早的 Windows 10 用 19
             if (DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int)) != 0) DwmSetWindowAttribute(Handle, 19, ref on, sizeof(int));
+            // 窗口已经显示时 Windows 10 不会自己重画标题栏：按当前是否在前台重新「激活」一次
+            if (Visible)
+            {
+                bool active = ActiveForm == this;
+                SendMessage(Handle, 0x0086, (IntPtr)(active ? 0 : 1), IntPtr.Zero);  // WM_NCACTIVATE
+                SendMessage(Handle, 0x0086, (IntPtr)(active ? 1 : 0), IntPtr.Zero);
+            }
             // 页面加载出来之前的底色，免得深色模式下先白一下
             BackColor = dark ? Color.FromArgb(20, 22, 27) : Color.FromArgb(245, 246, 248);
             web.DefaultBackgroundColor = BackColor;
