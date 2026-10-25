@@ -46,7 +46,7 @@ if (Test-Path $wh) {
   }
   Write-Host '网卡的 WeakHostSend 已恢复成安装前的设置'
 }
-foreach ($p in 'config.json', 'config.json.prev', 'config.json.new', 'panel-secret', 'app', 'panel', 'data', 'sing-box.exe', 'helper.ps1', 'update.ps1', 'helper.log', 'sing-box.log', 'sing-box.prev.log', 'sing-box.out.log', 'safe-mode.json', 'server-fallback.json', 'weakhost.json') {
+foreach ($p in 'config.json', 'config.json.prev', 'config.json.new', 'panel-secret', 'app', 'panel', 'data', 'sing-box.exe', 'helper.ps1', 'update.ps1', 'uninstall.bat', 'VERSION', 'helper.log', 'sing-box.log', 'sing-box.prev.log', 'sing-box.out.log', 'safe-mode.json', 'server-fallback.json', 'weakhost.json') {
   $t = Join-Path $dir $p
   if (Test-Path $t) { Remove-Item $t -Recurse -Force }
 }
@@ -57,5 +57,11 @@ if ($Purge) {
   Write-Host '已卸载，「我的规则」、订阅和设置、流量统计也都已删除。'
 } else {
   Write-Host "已卸载。「我的规则」（$dir\rules）、订阅和设置（profile.json）、流量统计（traffic.json）保留，重新安装后接着用；要一起删除：uninstall.ps1 -Purge"
+}
+# 全部删除时最后删自己（脚本已经读进内存，删得掉），安装目录空了就一起删；
+# 卸载程序（uninstall-neu-v6-free.exe）还在时目录删不掉，由它最后删。保留数据时留着本脚本，以后还能 -Purge
+if ($Purge) {
+  Remove-Item $PSCommandPath -Force -ErrorAction SilentlyContinue
+  try { [IO.Directory]::Delete($dir) } catch { }  # 不递归：目录不空就什么都不删
 }
 if (-not $NoPause) { Read-Host '按回车关闭' | Out-Null }

@@ -309,13 +309,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
 
     func makeWindow() {
         let conf = WKWebViewConfiguration()
-        // 面板（9090）和助手状态页（9091）各自从 localStorage 取密钥：没有就填上，等于自动登录
+        // 面板（9090）和助手状态页（9091）各自从 localStorage 取密钥：每次都填文件里的，等于自动登录。
+        // 不能只在没存时填：重新安装后密钥换了，存着的旧密钥会让面板先要密钥
         if let s = panelSecret(), let js = try? JSONSerialization.data(withJSONObject: [s]),
             let arr = String(data: js, encoding: .utf8)
         {
             let src = """
                 if (location.hostname === "127.0.0.1" && ["9090", "9091"].includes(location.port)) {
-                  try { if (!localStorage.getItem("neu-secret")) localStorage.setItem("neu-secret", \(arr)[0]); } catch (e) {}
+                  try { localStorage.setItem("neu-secret", \(arr)[0]); } catch (e) {}
                 }
                 """
             conf.userContentController.addUserScript(
@@ -355,6 +356,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
 
     let errorPage = """
         <!doctype html><meta charset="utf-8"><style>
+        :root{color-scheme:light dark}
         body{font:15px/1.7 -apple-system,"PingFang SC",sans-serif;max-width:560px;margin:80px auto;padding:0 20px;color:#1c2027}
         @media (prefers-color-scheme: dark){body{color:#e6e8ec;background:#1c1e22}}
         code{font:13px ui-monospace,Menlo,monospace}</style>

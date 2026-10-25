@@ -952,9 +952,11 @@ def update_checker():
 
 # sing-box 停掉时面板（由 sing-box 提供）打不开，助手自己给一个最简单的状态页
 STATUS_PAGE = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>校园网 v6 免流 · 状态</title><style>body{font:15px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;max-width:620px;margin:40px auto;padding:0 16px;color:#1c2027}
-.card{border:1px solid #e1e4ea;border-radius:12px;padding:16px 18px;margin:12px 0}.ok{color:#157f3b}.warn{color:#b45309}button{padding:6px 14px;border-radius:8px;border:1px solid #2457d6;background:#2457d6;color:#fff;cursor:pointer}
-input{padding:6px 10px;border:1px solid #e1e4ea;border-radius:8px}.muted{color:#646b78;font-size:13px}</style></head><body>
+<title>校园网 v6 免流 · 状态</title><style>:root{color-scheme:light dark;--bg:#f5f6f8;--text:#1c2027;--line:#e1e4ea;--ok:#157f3b;--warn:#b45309;--accent:#2457d6;--muted:#646b78}
+@media (prefers-color-scheme:dark){:root{--bg:#14161b;--text:#e7e9ee;--line:#2c303a;--ok:#5fd38a;--warn:#f2b35c;--accent:#7aa2ff;--muted:#a0a6b2}}
+body{font:15px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;max-width:620px;margin:40px auto;padding:0 16px;color:var(--text);background:var(--bg)}a{color:var(--accent)}
+.card{border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:12px 0}.ok{color:var(--ok)}.warn{color:var(--warn)}button{padding:6px 14px;border-radius:8px;border:1px solid #2457d6;background:#2457d6;color:#fff;cursor:pointer}
+input{padding:6px 10px;border:1px solid var(--line);border-radius:8px}.muted{color:var(--muted);font-size:13px}</style></head><body>
 <h2>校园网 v6 免流 · 状态</h2><div class="card" id="st">读取中……</div>
 <div class="card"><input type="password" id="sec" placeholder="面板密钥"> <button id="go"></button><p class="muted" id="msg"></p></div>
 <p class="muted">面板：<a href="http://127.0.0.1:9090/ui">http://127.0.0.1:9090/ui</a>（sing-box 运行时才能打开）</p>

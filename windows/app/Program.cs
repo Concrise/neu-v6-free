@@ -163,6 +163,9 @@ namespace NeuV6Free
             try
             {
                 var h = Json.Parse(await GetText("health"));
+                // 重新启用时助手要十几秒确认能上网，这期间它顾不上回应 /health（一次只处理一个请求）：
+                // 保持原来的状态，别把图标变成出问题、把窗口换成出错页
+                if (h == null && busy != null) return;
                 Status = h == null ? new Status() : Status.From(h);
                 Polled = true;
                 tray.Icon = icons[Status.Running ? Look.On : Status.SafeReason != null ? Look.Paused : Look.Problem];
@@ -382,6 +385,7 @@ namespace NeuV6Free
         static readonly string BoundsFile = Path.Combine(Program.Data, "window.txt");
 
         const string ErrorPage = @"<!doctype html><meta charset=""utf-8""><style>
+:root{color-scheme:light dark}
 body{font:15px/1.7 ""Segoe UI"",""Microsoft YaHei"",sans-serif;max-width:560px;margin:80px auto;padding:0 20px;color:#1c2027}
 @media (prefers-color-scheme: dark){body{color:#e6e8ec;background:#1c1e22}}
 code{font:13px Consolas,monospace}</style>
@@ -402,7 +406,52 @@ code{font:13px Consolas,monospace}</style>
             StartPosition = FormStartPosition.CenterScreen;
             LoadBounds();
             Controls.Add(web);
+            SystemEvents.UserPreferenceChanged += ThemeChanged;
             Init();
+        }
+
+        // ---------- 深色模式 ----------
+        // 页面自己按 prefers-color-scheme 换颜色（WebView2 跟着系统），但标题栏是 Windows 画的：要自己告诉它用深色
+
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+        /// <summary>「设置 → 个性化 → 颜色 → 选择默认应用模式」选了深色</summary>
+        static bool SystemDark()
+        {
+            try
+            {
+                using var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+                return k?.GetValue("AppsUseLightTheme") is int v && v == 0;
+            }
+            catch { return false; }
+        }
+
+        void ApplyTheme()
+        {
+            bool dark = SystemDark();
+            int on = dark ? 1 : 0;
+            // 20 = DWMWA_USE_IMMERSIVE_DARK_MODE（Windows 10 20H1 起、Windows 11）；更早的 Windows 10 用 19
+            if (DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int)) != 0) DwmSetWindowAttribute(Handle, 19, ref on, sizeof(int));
+            // 页面加载出来之前的底色，免得深色模式下先白一下
+            BackColor = dark ? Color.FromArgb(20, 22, 27) : Color.FromArgb(245, 246, 248);
+            web.DefaultBackgroundColor = BackColor;
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            ApplyTheme();
+        }
+
+        void ThemeChanged(object sender, UserPreferenceChangedEventArgs e)
+        {
+            if (e.Category == UserPreferenceCategory.General && IsHandleCreated) BeginInvoke((Action)ApplyTheme);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) SystemEvents.UserPreferenceChanged -= ThemeChanged;  // 静态事件：不退订窗口就一直不会被回收
+            base.Dispose(disposing);
         }
 
         async void Init()
@@ -429,12 +478,13 @@ code{font:13px Consolas,monospace}</style>
             var core = web.CoreWebView2;
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.IsStatusBarEnabled = false;
-            // 面板（9090）和助手状态页（9091）各自从 localStorage 取密钥：没有就填上，等于自动登录
+            // 面板（9090）和助手状态页（9091）各自从 localStorage 取密钥：每次都填文件里的，等于自动登录。
+            // 不能只在没存时填：重新安装后密钥换了，存着的旧密钥会让面板先要密钥
             var secret = Program.Secret();
             if (secret != null)
                 await core.AddScriptToExecuteOnDocumentCreatedAsync(
                     "if (location.hostname === '127.0.0.1' && ['9090', '9091'].includes(location.port)) {" +
-                    $" try {{ if (!localStorage.getItem('neu-secret')) localStorage.setItem('neu-secret', {Json.Str(secret)}); }} catch (e) {{}} }}");
+                    $" try {{ localStorage.setItem('neu-secret', {Json.Str(secret)}); }} catch (e) {{}} }}");
             // 本机页面在窗口里开，别的网址（GitHub 等）交给默认浏览器
             core.NewWindowRequested += (s, e) => { e.Handled = true; Program.OpenExternal(e.Uri); };
             core.NavigationStarting += (s, e) =>
