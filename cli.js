@@ -397,6 +397,12 @@ async function packageExtras(platform, dir, out) {
     const dist = path.join(res, "distribution.xml");
     fs.writeFileSync(dist, fs.readFileSync(path.join(ROOT, "mac/pkg/distribution.xml"), "utf8").replaceAll("__VERSION__", VERSION));
     execFileSync("productbuild", ["--quiet", "--distribution", dist, "--resources", res, "--package-path", comp, path.join(out, `${base}.pkg`)]);
+    // 打包用的 App 副本（zip 和 .pkg 里都已经有了）：从系统登记里注销再删掉，免得启动台、「应用程序」里出现两个「校园网 v6 免流」
+    const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+    for (const a of [path.join(dir, APP_NAME), path.join(pkgDir, APP_NAME)]) {
+      try { execFileSync(lsregister, ["-u", a], { stdio: "ignore" }); } catch { }
+    }
+    fs.rmSync(path.join(dir, APP_NAME), { recursive: true, force: true });
     for (const d of [".pkg-root", ".pkg-scripts", ".pkg-comp", ".pkg-res"]) fs.rmSync(path.join(out, d), { recursive: true, force: true });
     addSum(out, `${base}.pkg`);
     console.log(`已打包 ${path.join(out, base + ".pkg")}`);

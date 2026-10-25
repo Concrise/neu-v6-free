@@ -145,8 +145,9 @@
   .stat .s { font-size: 13px; color: var(--muted); }
   .stat .v.free { color: var(--free); }
   .stat .v.paid { color: var(--paid); }
-  .bars { display: flex; align-items: flex-end; gap: 8px; height: 64px; }
-  .bars div { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; height: 64px; }
+  .stat .v.srv { color: var(--accent); }
+  .bars { display: flex; align-items: flex-end; justify-content: space-around; gap: 12px; height: 64px; }
+  .bars div { flex: 1 1 0; max-width: 72px; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; height: 64px; }
   .bars i { display: block; border-radius: 3px; }
   .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
   .legend span { display: flex; align-items: center; gap: 6px; }
@@ -432,30 +433,41 @@ function renderHome() {
   m.append(hero);
 
   if (helper.traffic) {
-    const stats = $(`<div class="stats">
-      <div class="card stat"><div class="k">本月省下</div><div class="v free">—</div><div class="s">走 IPv6 和服务器的免费流量</div></div>
-      <div class="card stat"><div class="k">本月计费</div><div class="v paid">—</div><div class="s">只有 IPv4、直接连出去的流量</div></div>
-      <div class="card stat"><div class="k"><span>最近 7 天</span><a href="#/traffic">明细</a></div><div class="bars" role="img" aria-label="最近 7 天每天的免费和计费流量"></div>
-        <div class="legend"><span><i style="background:var(--free)"></i>免费</span><span><i style="background:var(--paid)"></i>计费</span></div></div></div>`);
+    // 省下的分开算：走 IPv6 直连的（模式一、二都有）和经自己的服务器的（模式二）
+    const card = (cls, k, s) => `<div class="card stat ${cls}"><div class="k">${k}</div><div class="v ${cls}">—</div><div class="s">${s}</div></div>`;
+    const stats = $(`<div class="sec" style="gap:16px"><div class="stats">
+      ${card("free", "本月走 IPv6 省下", "有 IPv6 的网站直接走 IPv6，不计费")}
+      ${tunnel ? card("srv", "本月经服务器省下", "只有 IPv4 的网站经你的服务器出去，不计费") : ""}
+      ${card("paid", "本月计费", "只有 IPv4、直接连出去的流量")}</div>
+      <div class="card stat week"><div class="k"><span>最近 7 天</span><a href="#/traffic">明细</a></div><div class="bars" role="img" aria-label="最近 7 天每天的流量：走 IPv6、经服务器、计费"></div>
+        <div class="legend"><span><i style="background:var(--free)"></i>IPv6</span>${tunnel ? `<span class="lg-srv"><i style="background:var(--accent)"></i>经服务器</span>` : ""}<span><i style="background:var(--paid)"></i>计费</span></div></div></div>`);
     m.append(stats);
     helperApi("/traffic").then((d) => {
       const now = new Date(), pad = (n) => String(n).padStart(2, "0"), key = (t) => `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
       const x = d.months[key(now).slice(0, 7)] || { v6: 0, server: {}, v4: 0 };
-      const [free, paid] = stats.querySelectorAll(".v");
-      free.innerHTML = bigSize(x.v6 + srvSum(x));
-      paid.innerHTML = bigSize(x.v4);
+      const srvMonth = srvSum(x);
+      if (!tunnel && srvMonth > 0) {
+        // 这个月中途从模式二换回了模式一：经服务器的那部分照样单独显示
+        stats.querySelector(".stat.paid").before($(card("srv", "本月经服务器省下", "这个月之前经服务器出去的流量")));
+        stats.querySelector(".legend span:first-child").after($(`<span><i style="background:var(--accent)"></i>经服务器</span>`));
+      }
+      stats.querySelector(".v.free").innerHTML = bigSize(x.v6);
+      const sv = stats.querySelector(".v.srv");
+      if (sv) sv.innerHTML = bigSize(srvMonth);
+      stats.querySelector(".v.paid").innerHTML = bigSize(x.v4);
       const days = [];
       for (let i = 6; i >= 0; i--) {
         const t = new Date(now);
         t.setDate(now.getDate() - i);
         const y = d.days[key(t)] || {};
-        days.push([(y.v6 || 0) + srvSum(y), y.v4 || 0, key(t).slice(5)]);
+        days.push([y.v6 || 0, srvSum(y), y.v4 || 0, key(t).slice(5)]);
       }
-      const max = Math.max(1, ...days.map(([f, p]) => f + p));
+      const max = Math.max(1, ...days.map(([a, b, c]) => a + b + c));
       if (max === 1) { stats.querySelector(".bars").outerHTML = `<div class="hint" style="height:64px;display:grid;place-items:center">还没有数据</div>`; return; }
-      const h = (b) => (b ? Math.max(2, Math.round(b / max * 60)) : 0);
-      stats.querySelector(".bars").innerHTML = days.map(([f, p, k]) =>
-        `<div title="${k}：免费 ${gb(f)}B，计费 ${gb(p)}B"><i style="background:var(--paid);height:${h(p)}px"></i><i style="background:var(--free);height:${h(f)}px"></i></div>`).join("");
+      const h = (v) => (v ? Math.max(2, Math.round(v / max * 60)) : 0);
+      stats.querySelector(".bars").innerHTML = days.map(([v6, sv, p, k]) =>
+        `<div title="${k}：走 IPv6 ${gb(v6)}B，经服务器 ${gb(sv)}B，计费 ${gb(p)}B"><i style="background:var(--paid);height:${h(p)}px"></i>`
+        + `<i style="background:var(--accent);height:${h(sv)}px"></i><i style="background:var(--free);height:${h(v6)}px"></i></div>`).join("");
     }).catch(() => { });
   }
 
@@ -1551,7 +1563,7 @@ function serverBox(p, s, servers, ids) {
   for (const id of ids) {
     const v = servers[id];
     const li = $(`<div class="li"><div class="main"><div class="t">${esc(v.label)}</div><div class="d mono">${esc(id)} · ${esc(v.v6)}</div></div>
-      <label class="check"><input type="checkbox" ${v.landing ? "checked" : ""}>也当国外线路用</label><button class="btn small ghost">删除</button></div>`);
+      <label class="check"><input type="checkbox" style="flex:none" ${v.landing ? "checked" : ""}>也当国外线路用</label><button class="btn small ghost">删除</button></div>`);
     li.querySelector("input").onchange = (e) => { v.landing = e.target.checked; changed(); };
     li.querySelector("button").onclick = () => {
       if (ids.length === 1 && !confirm("删掉最后一台服务器就换回模式一。确定？")) return;
@@ -1616,8 +1628,8 @@ function proxySection(m) {
     <div class="li"><label class="main" for="port"><div class="t">代理端口</div>
       <div class="d">大部分程序不用设。命令行工具、浏览器插件要代理时填 127.0.0.1 和这个端口（HTTP、SOCKS5 都行）。</div></label>
       <input type="text" id="port" class="port mono" inputmode="numeric" style="width:110px"></div>
-    <div class="li" style="display:${ids.length ? "flex" : "none"}"><label class="check main"><input type="checkbox" class="via">
-      订阅里的节点先经免流服务器再出去（免费）。关掉 = 校园网 IPv4 直接连节点（计费，延迟低）</label></div></div></section>`);
+    <div class="li" style="display:${ids.length ? "flex" : "none"}"><label class="check main"><input type="checkbox" class="via" style="flex:none">
+      <span style="flex:1">订阅里的节点先经免流服务器再出去（免费）。关掉 = 校园网 IPv4 直接连节点（计费，延迟低）</span></label></div></div></section>`);
   const port = other.querySelector(".port");
   port.value = s.main_port ?? client.defaults.main_port ?? "";
   port.onchange = () => {
@@ -1645,13 +1657,13 @@ function renderUpdate(m) {
     if (v.error) { body.textContent = v.error; body.classList.add("err"); }
     else if (!v.latest) body.textContent = "还没检查过。";
     else if (!v.available) body.textContent = `已是最新（${when(v.checked)} 检查过；每天自动检查一次）。有新版本时概览页和这里会提示，点一下就更新。`;
-    else body.textContent = `有新版本 ${v.latest}。`;
+    else body.textContent = `${when(v.checked)} 检查到新版本。`;
     if (!v.available) return;
-    const box = $(`<div class="upd sec"><div><b>有新版本 ${esc(v.latest)}</b> · <a href="${esc(v.url)}" target="_blank" rel="noopener">在 GitHub 上看</a></div>
-      <pre class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto;margin:0;background:var(--sunken);padding:12px;border-radius:10px">${esc(v.notes || "（没有说明）")}</pre>
-      <p class="hint" style="margin:0">换上新的面板、生成器、规则集和本地助手，不需要管理员密码；配置、订阅与设置、我的规则都保留。
-      安装包先按发布里的 SHA256 校验，不对就不装。装完点一次页面上方的「应用」，新生成器才会用上。</p>
-      <div><button class="btn primary big">更新到 ${esc(v.latest)}</button></div></div>`);
+    // 更新说明不在这里显示（Markdown 显示不好）：给个链接去 GitHub 看
+    const box = $(`<div class="upd row" style="border-top:1px solid var(--line);padding-top:14px"><div class="grow" style="min-width:240px">
+      <b>有新版本 ${esc(v.latest)}</b> · <a href="${esc(v.url)}" target="_blank" rel="noopener">在 GitHub 上看更新了什么</a>
+      <div class="hint">不需要管理员密码；配置、订阅、设置和我的规则都保留，装完点一次页面上方的「应用」。</div></div>
+      <button class="btn primary big">更新到 ${esc(v.latest)}</button></div>`);
     const b = box.querySelector("button");
     b.onclick = async () => {
       b.disabled = true;
