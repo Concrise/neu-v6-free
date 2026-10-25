@@ -44,7 +44,7 @@
 - **日志**：sing-box 的警告和错误实时显示，节点连不上、规则集出错一眼看到。
 - **只有第一次安装要管理员权限**：之后更新配置交给后台的本地助手，不用再输密码。
 - **自动检查更新**：本地助手每天查一次 GitHub 上的新版本，面板里一键更新（下载后按 SHA256 校验，不用管理员密码，订阅、设置、我的规则都保留）。
-- **断网保护**：装完、更新后、运行中都会检查，经 sing-box 上不了网就自动撤回或暂停，电脑回到普通网络。见下方[断网保护](#断网保护)。
+- **断网保护**：装完、更新后、运行中都会检查，经 sing-box 上不了网就暂停 sing-box 或换回旧配置，电脑回到普通网络。见下方[断网保护](#断网保护)。
 - **启动不依赖网络**：电脑上规则集随配置一起装，服务器不通时也能正常上网。
 
 | 我的规则 | 实时连接 · 改规则 |
@@ -72,7 +72,7 @@
 - **Windows 10 / 11**：`neu-v6-free-<版本>-windows-setup.exe`，双击安装，管理员确认点「是」。没有数字签名，弹出「Windows 已保护你的电脑」时
   点「更多信息 → 仍要运行」。装到 `C:\neu-v6-free`，开始菜单和桌面有「校园网 v6 免流」，卸载在「设置 → 应用」。详见 [docs/windows.md](docs/windows.md)。
 
-安装程序自带 sing-box 内核，不用另外下载。只有这一次要管理员权限。装完会自检，不通自动撤回；
+安装程序自带 sing-box 内核，不用另外下载。只有这一次要管理员权限。装完会自检，不通就暂停 sing-box、电脑回到普通网络；
 通过后自动打开「校园网 v6 免流」App：窗口里是面板（自动登录，面板密钥是安装时随机生成的），菜单栏 / 托盘里有 v6 图标，能看运行状态、暂停 / 重新启用、看今天的流量。关掉窗口、退出 App 都不影响免流。
 
 装好时是**第一部分**：有 IPv6 的国内网站已经在走 v6 免费了。
@@ -104,7 +104,7 @@
 
 ### 高级：用命令行生成
 
-想把设置写在文件里管理（或自己改生成器）：需要 [Node.js](https://nodejs.org/) 18 以上。
+想把设置写在文件里管理（或自己改生成器）：需要 [Node.js](https://nodejs.org/) 18 以上和 [Go](https://go.dev/dl/)（本地助手是 Go 写的，生成时顺便编译）。
 
 ```bash
 git clone https://github.com/Concrise/neu-v6-free.git
@@ -117,7 +117,7 @@ sudo mac/install.sh                  # Windows：双击 out\windows\install.bat
 以后改了 `config.yaml`：重新生成，macOS 运行 `mac/update.sh`、Windows 双击新生成目录里的 `update.bat`（都不用管理员）。
 命令行生成的设置会同步到面板里；之后再用命令行更新，会用文件里的设置覆盖面板里改的。
 发布新版本：改 `package.json` 的版本号，提交并推送，等 GitHub Actions 的「Windows App」编译完（Windows 的 App 在那里编译），
-再运行 `node cli.js --package -o dist`（需要 `brew install makensis` 编译 Windows 安装程序、`gh` 下载编好的 Windows App，
+再运行 `node cli.js --package -o dist`（需要 `brew install makensis go` 编译 Windows 安装程序和本地助手、`gh` 下载编好的 Windows App，
 macOS 的 App 用本机的 swiftc 编译），
 得到 macOS 的 `.pkg`、Windows 的 `-setup.exe`（都自带 sing-box）、两个 `.zip`（自动更新用）和 `SHA256SUMS`，
 再 `gh release create v<版本> dist/*.pkg dist/*.exe dist/*.zip dist/SHA256SUMS`。已经装好的客户端会在一天内发现并提示更新。
@@ -129,7 +129,7 @@ macOS 的 App 用本机的 swiftc 编译），
 
 这个工具会接管整台电脑的网络，所以它的第一原则是**绝不能让你断网**：
 
-- **装完自检**：安装后立刻测一次。经 sing-box 上不了网、绕过它却能上，就自动撤回（停掉并取消开机启动），电脑恢复原样。
+- **装完自检**：安装后立刻测一次。经 sing-box 上不了网、绕过它却能上，就暂停 sing-box（安全模式），电脑回到普通网络，并说明原因；排除问题后在 App 或状态页点「重新启用」。
 - **更新自检**：新配置装上后不通，自动换回旧配置。
 - **运行中看门狗**：本地助手每 30 秒检查一次，连续 3 次「经 sing-box 不通、绕过它能通」就暂停 sing-box（安全模式），电脑回到普通网络。离开校园网连不上服务器时也会这样。sing-box 反复崩溃也会停手。
 - **随时手动暂停**：面板「概览」里的「暂停」；或打开本地助手的状态页 `http://127.0.0.1:9091/`（sing-box 停着时面板打不开，状态页还在），在那里暂停或重新启用。
@@ -163,8 +163,10 @@ cli.js              命令行生成器
 lib/                生成逻辑（命令行、网页生成器、面板共用）：groups.js 是分组与规则定义，build.js 生成 sing-box 配置，
                     subscription.js 解析订阅与节点链接，convert.js 把节点转成 sing-box 出站
 panel/              网页面板（单个 HTML 文件；安装时 lib/ 一起装进 panel/lib/，面板在浏览器里生成配置）
-mac/                macOS 安装 / 更新 / 卸载脚本，本地助手 helper.py；pkg/ 是 .pkg 安装程序的资源，app/ 是 App（Swift）
-windows/            Windows 安装 / 更新 / 卸载脚本，本地助手 helper.ps1；installer.nsi 是 setup.exe 的 NSIS 脚本，
+helper/             本地助手（Go，单个程序，不依赖任何东西）：启动并看着 sing-box、我的规则、流量统计、安装新配置和更新，
+                    安装 / 卸载也是它（neu-v6-free install / uninstall）；GitHub Actions 上编译检查
+mac/                macOS 安装 / 更新 / 卸载的包装脚本；pkg/ 是 .pkg 安装程序的资源，app/ 是 App（Swift）
+windows/            Windows 安装 / 更新 / 卸载的 .bat；installer.nsi 是 setup.exe 的 NSIS 脚本，
                     app/ 是 App（C# + WebView2，在 GitHub Actions 上编译：.github/workflows/windows-app.yml）
 licenses/           随安装程序附带的第三方许可证（sing-box 的 GPLv3 全文）
 server/setup.sh     第二部分的服务器一键部署脚本

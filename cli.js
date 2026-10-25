@@ -5,7 +5,7 @@
 //                                     出 zip（自动更新用）、mac 的 .pkg 和 windows 的 setup.exe（自带 sing-box）、SHA256SUMS
 // 多个 -c 依次合并（后面的覆盖前面的同名项），方便把「可以入库的设置」和「含密钥的设置」分开放。
 // 输出 <out>/<平台>/config.json；mac/windows 另带 panel/（面板）和 rules/（本地规则集与「我的规则」空文件），
-// mac 另带 helper.py，windows 另带 install.ps1 / update.ps1 / uninstall.ps1 / helper.ps1。
+// mac/windows 另带本地助手兼安装程序 neu-v6-free（helper/，Go 写的，不依赖任何东西），windows 另带 install.bat / update.bat / uninstall.bat。
 // mac/windows 还带 profile.json：这些设置的副本，装好后面板里的「订阅与节点」「设置」接着用（含密钥，权限 600）。
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -70,7 +70,7 @@ async function main() {
   const settings = {};
   for (const c of a.configs) Object.assign(settings, yaml.load(fs.readFileSync(c, "utf8")) || {});
   if (!a.tun) settings.tun = false;
-  // 发布包：面板密钥留占位符，安装脚本第一次安装时换成随机的（mac/install.sh、windows/install.ps1）
+  // 发布包：面板密钥留占位符，第一次安装时换成随机的（neu-v6-free install）
   if (a.package) settings.clash_api_secret = "__NEU_SECRET__";
 
   const proxies = [];
@@ -119,13 +119,24 @@ async function main() {
       fs.mkdirSync(rd, { recursive: true });
       for (const r of userSets) fs.writeFileSync(path.join(rd, `${r.tag}.json`), EMPTY_RULE_SET);
     }
-    // 本地助手（以及 windows 的安装 / 更新 / 卸载脚本）一起放进去：更新时助手顺便升级自己
-    if (platform === "mac") fs.copyFileSync(path.join(ROOT, "mac", "helper.py"), path.join(dir, "helper.py"));
+    // 本地助手兼安装程序一起放进去：安装用它，更新时助手顺便升级自己
+    if (platform === "mac" || platform === "windows") {
+      const bin = helperBinary(platform, a.out);
+      if (bin) {
+        const dest = path.join(dir, platform === "windows" ? "neu-v6-free.exe" : "neu-v6-free");
+        fs.copyFileSync(bin, dest);
+        fs.chmodSync(dest, 0o755);
+      }
+      for (const f of ["helper.py", "install.sh", "uninstall.sh", "helper-service.sh", "install.ps1", "update.ps1", "uninstall.ps1", "helper.ps1"]) {
+        fs.rmSync(path.join(dir, f), { force: true });  // 以前的版本生成的
+      }
+    }
     // 版本号：装到安装目录，本地助手据此判断 GitHub 上有没有新版本
     if (platform === "mac" || platform === "windows") fs.writeFileSync(path.join(dir, "VERSION"), VERSION + "\n");
     if (platform === "windows") {
-      for (const f of fs.readdirSync(path.join(ROOT, "windows"))) {
-        if (/\.(ps1|bat)$/.test(f)) fs.copyFileSync(path.join(ROOT, "windows", f), path.join(dir, f));  // installer.nsi 只用来编译安装程序
+      // 双击用的小脚本；发布包不带 update.bat（起步配置不用「更新」，订阅在面板里加）
+      for (const f of ["install.bat", "uninstall.bat", ...(a.package ? [] : ["update.bat"])]) {
+        fs.copyFileSync(path.join(ROOT, "windows", f), path.join(dir, f));
       }
     }
     if (a.package) await packageExtras(platform, dir, a.out);
@@ -135,7 +146,7 @@ async function main() {
 }
 
 // 安装程序里自带的 sing-box：固定用测试过的版本（新的大版本常常改配置格式）。
-// mac/install.sh、windows/install.ps1 找不到 sing-box 时下载的也是这个版本，改的时候三处一起改
+// 本地助手（helper/install.go 的 singBoxVersionPinned）找不到 sing-box 时下载的也是这个版本，改的时候两处一起改
 const SINGBOX_VERSION = "1.13.21";
 
 /** 下载 sing-box 官方发布到缓存目录（<out>/.cache），返回解压出的可执行文件路径 */
@@ -181,8 +192,73 @@ function addSum(out, file) {
 const APP_NAME = "校园网 v6 免流.app";
 
 /**
+ * 本地助手兼安装程序（helper/，Go）：mac 是 arm64 + x86_64 通用二进制，windows 是 x64（ARM64 的 Windows 能模拟运行 x64）。
+ * 有 go 就在本机编（几秒钟）；没有就按当前提交下载 GitHub Actions 编好的（.github/workflows/windows-app.yml）。
+ * 都拿不到时返回 null：生成目录里不带它，已经装好的可以用安装目录里的 neu-v6-free apply 更新。
+ */
+const helperBuilt = {};
+function helperBinary(platform, out) {
+  if (platform in helperBuilt) return helperBuilt[platform];
+  const cache = path.join(out, ".cache");
+  fs.mkdirSync(cache, { recursive: true });
+  const name = platform === "windows" ? "neu-v6-free-windows-amd64.exe" : "neu-v6-free-mac";
+  let result = null;
+  try {
+    execFileSync("go", ["version"], { stdio: "ignore" });
+    const build = (goos, goarch, o) => execFileSync("go", ["build", "-trimpath", "-ldflags", `-s -w -X main.version=${VERSION}`, "-o", path.resolve(o), "./helper"],
+      { cwd: ROOT, env: { ...process.env, GOOS: goos, GOARCH: goarch, CGO_ENABLED: "0" }, stdio: ["ignore", "inherit", "inherit"] });
+    if (platform === "windows") build("windows", "amd64", path.join(cache, name));
+    else {
+      build("darwin", "arm64", path.join(cache, "neu-v6-free-darwin-arm64"));
+      build("darwin", "amd64", path.join(cache, "neu-v6-free-darwin-amd64"));
+      execFileSync("lipo", ["-create", path.join(cache, "neu-v6-free-darwin-arm64"), path.join(cache, "neu-v6-free-darwin-amd64"), "-output", path.join(cache, name)]);
+    }
+    result = path.join(cache, name);
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;  // go 报编译错误时直接停下
+    const dir = ciArtifact("neu-v6-free-helper", out);
+    if (dir && platform === "windows") result = path.join(dir, "neu-v6-free-windows-amd64.exe");
+    if (dir && platform === "mac") {
+      try {
+        execFileSync("lipo", ["-create", path.join(dir, "neu-v6-free-darwin-arm64"), path.join(dir, "neu-v6-free-darwin-amd64"), "-output", path.join(cache, name)]);
+        result = path.join(cache, name);
+      } catch { result = null; }
+    }
+    if (!result || !fs.existsSync(result)) {
+      console.error("提示：没有 go（https://go.dev/dl/），也拿不到 GitHub Actions 编好的本地助手：生成目录里不带 neu-v6-free");
+      result = null;
+    }
+  }
+  helperBuilt[platform] = result;
+  return result;
+}
+
+/** 按当前提交下载 GitHub Actions 的编译产物（要装 gh 并登录）；返回解压到的目录，拿不到返回 null */
+function ciArtifact(artifact, out) {
+  const git = (...a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8" }).trim();
+  let sha;
+  try { sha = git("rev-parse", "HEAD"); } catch { return null; }
+  const dir = path.join(out, ".cache", `${artifact}-${sha.slice(0, 12)}`);
+  if (fs.existsSync(dir) && fs.readdirSync(dir).length) return dir;
+  const gh = (...a) => execFileSync("gh", ["-R", "Concrise/neu-v6-free", ...a], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    const run = JSON.parse(gh("run", "list", "--workflow", "windows-app.yml", "--commit", sha, "--status", "success", "--limit", "1", "--json", "databaseId"))[0];
+    if (!run) {
+      console.error(`提示：GitHub Actions 上还没有提交 ${sha.slice(0, 7)} 的编译结果（先推送，等「Windows App」跑完）`);
+      return null;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+    gh("run", "download", String(run.databaseId), "-n", artifact, "-D", dir);
+    return dir;
+  } catch (e) {
+    console.error(`提示：下载 GitHub Actions 的 ${artifact} 失败（${String(e.stderr || e.message).trim()}）`);
+    return null;
+  }
+}
+
+/**
  * Mac 的 App（mac/app/main.swift：窗口里是面板 + 菜单栏图标）。arm64 和 x86_64 各编一次合成通用二进制，
- * 图标由 make-icon.swift 现画。放进安装包目录：install.sh 和一键更新都从这里装到 /Applications。
+ * 图标由 make-icon.swift 现画。放进安装包目录：neu-v6-free install 和一键更新都从这里装到 /Applications。
  * 没有 swiftc（xcode-select --install）就跳过，安装后改用浏览器打开面板。
  */
 function macApp(dir, out) {
@@ -239,24 +315,13 @@ function winApp(dir, out) {
   let src = process.env.NEU_WINDOWS_APP;
   if (!src) {
     const git = (...a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8" }).trim();
-    let sha;
-    try { sha = git("rev-parse", "HEAD"); } catch { return console.error("提示：不是 git 仓库，安装包里不带 Windows App"); }
-    if (git("status", "--porcelain", "--", "windows/app", "package.json")) {
-      console.error("提示：windows/app 或 package.json 有没提交的改动；安装包里的 Windows App 是按当前提交编译的");
-    }
-    src = path.join(out, ".cache", `windows-app-${sha.slice(0, 12)}`);
-    if (!fs.existsSync(path.join(src, "neu-v6-free.exe"))) {
-      const gh = (...a) => execFileSync("gh", ["-R", "Concrise/neu-v6-free", ...a], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-      let run;
-      try {
-        run = JSON.parse(gh("run", "list", "--workflow", "windows-app.yml", "--commit", sha, "--status", "success", "--limit", "1", "--json", "databaseId"))[0];
-      } catch (e) {
-        return console.error(`提示：查不到 GitHub Actions 的编译结果（${String(e.stderr || e.message).trim()}），安装包里不带 Windows App`);
+    try {
+      if (git("status", "--porcelain", "--", "windows/app", "package.json")) {
+        console.error("提示：windows/app 或 package.json 有没提交的改动；安装包里的 Windows App 是按当前提交编译的");
       }
-      if (!run) return console.error(`提示：GitHub Actions 上还没有提交 ${sha.slice(0, 7)} 的 Windows App（先推送，等「Windows App」跑完），安装包里不带 Windows App`);
-      fs.rmSync(src, { recursive: true, force: true });
-      gh("run", "download", String(run.databaseId), "-n", "neu-v6-free-windows-app", "-D", src);
-    }
+    } catch { /* 不是 git 仓库 */ }
+    src = ciArtifact("neu-v6-free-windows-app", out);
+    if (!src) return console.error("提示：安装包里不带 Windows App");
   }
   fs.cpSync(src, path.join(dir, "app"), { recursive: true });
   console.log(`Windows App：${src}`);
@@ -272,14 +337,13 @@ const tmpDir = (out, name) => { const d = path.join(out, name); fs.rmSync(d, { r
 async function packageExtras(platform, dir, out) {
   if (platform === "android" || platform === "ios") return;
   if (platform === "windows") winApp(dir, out);
+  if (!fs.existsSync(path.join(dir, platform === "windows" ? "neu-v6-free.exe" : "neu-v6-free"))) {
+    throw new Error("发布包里必须有本地助手 neu-v6-free：装 go（https://go.dev/dl/），或推送后等 GitHub Actions 编好再打包");
+  }
   if (platform === "mac") {
-    for (const f of ["install.sh", "uninstall.sh", "helper-service.sh"]) {
-      fs.copyFileSync(path.join(ROOT, "mac", f), path.join(dir, f));
-      fs.chmodSync(path.join(dir, f), 0o755);
-    }
-    const cmd = (script, what) => `#!/bin/bash\n# 双击运行：${what}（会要求输入开机密码）\ncd "$(dirname "$0")" && sudo ./${script}\necho; read -n 1 -s -r -p "按任意键关闭"\n`;
-    fs.writeFileSync(path.join(dir, "安装.command"), cmd("install.sh", "安装或升级"), { mode: 0o755 });
-    fs.writeFileSync(path.join(dir, "卸载.command"), cmd("uninstall.sh", "卸载（保留订阅、设置和我的规则）"), { mode: 0o755 });
+    const cmd = (what, run) => `#!/bin/bash\n# 双击运行：${what}（会要求输入开机密码）\ncd "$(dirname "$0")" && sudo ${run}\necho; read -n 1 -s -r -p "按任意键关闭"\n`;
+    fs.writeFileSync(path.join(dir, "安装.command"), cmd("安装或升级", "./neu-v6-free install"), { mode: 0o755 });
+    fs.writeFileSync(path.join(dir, "卸载.command"), cmd("卸载（保留订阅、设置和我的规则）", "/usr/local/libexec/neu-v6-free/neu-v6-free uninstall"), { mode: 0o755 });
     macApp(dir, out);
   }
   const base = `neu-v6-free-${VERSION}-${platform === "mac" ? "macos" : platform}`;
@@ -290,7 +354,7 @@ async function packageExtras(platform, dir, out) {
   const license = await singBoxLicense(out);
 
   if (platform === "mac") {
-    // .pkg：文件装到 /usr/local/libexec/neu-v6-free/package，postinstall 以 root 运行 install.sh（App 也由它装到 /Applications）
+    // .pkg：文件装到 /usr/local/libexec/neu-v6-free/package，postinstall 以 root 运行 neu-v6-free install（App 也由它装到 /Applications）
     const root = tmpDir(out, ".pkg-root");
     const pkgDir = path.join(root, "usr/local/libexec/neu-v6-free/package");
     fs.mkdirSync(path.dirname(pkgDir), { recursive: true });
@@ -305,7 +369,7 @@ async function packageExtras(platform, dir, out) {
     fs.copyFileSync(path.join(ROOT, "mac/pkg/postinstall"), path.join(scripts, "postinstall"));
     fs.chmodSync(path.join(scripts, "postinstall"), 0o755);
     const comp = tmpDir(out, ".pkg-comp");
-    // 包里的 App 只是安装材料（install.sh 再装到 /Applications）：pkgbuild 默认把 .app 当成「可搬移」的，
+    // 包里的 App 只是安装材料（neu-v6-free install 再装到 /Applications）：pkgbuild 默认把 .app 当成「可搬移」的，
     // 别处有同 ID 的 App 时会装到那里去，所以写明不可搬移
     const plist = path.join(comp, "components.plist");
     const hasApp = fs.existsSync(path.join(pkgDir, APP_NAME));

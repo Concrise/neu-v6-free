@@ -111,7 +111,7 @@ custom_rules:
 - 本平台不支持的条件会自动去掉：iOS 不能按进程，只有安卓有包名。
 - `rule_set` 写 `geosite/名字` 或 `geoip/名字`，名字见 [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat/tree/sing/geo)。
 
-改完重新生成并更新（macOS `mac/update.sh`，Windows `update.ps1`，手机重新导入）。
+改完重新生成并更新（macOS `mac/update.sh`，Windows `update.bat`，手机重新导入）。
 
 ### 加一个新的例外分组
 

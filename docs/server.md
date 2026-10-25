@@ -59,7 +59,7 @@ ssh root@你的服务器 'bash /root/setup.sh'
 
 ```bash
 node cli.js -p mac && mac/update.sh      # macOS（已安装时）
-node cli.js -p windows                    # Windows：然后运行 out\windows\update.ps1（已安装时）或 install.ps1
+node cli.js -p windows                    # Windows：然后双击 out\windows\update.bat（已安装时）或 install.bat
 ```
 
 `entry_servers` 里有服务器就是第二部分。面板里会多出「免流服务器」开关，「国内仅 v4 网站」默认经服务器。

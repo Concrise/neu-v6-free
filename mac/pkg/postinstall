@@ -1,12 +1,12 @@
 #!/bin/bash
-# .pkg 安装器把文件放好后以 root 运行：执行和 install.sh 相同的安装（装成后台服务、自检，不通自动撤回）。
+# .pkg 安装器把文件放好后以 root 运行 neu-v6-free install（装成后台服务、自检，不通就暂停 sing-box、网络恢复原样）。
 # 失败时安装器只会说「安装失败」，所以把原因用对话框告诉用户，完整记录在 /var/log/neu-v6-free-install.log。
 PKG=/usr/local/libexec/neu-v6-free/package
 LOG=/var/log/neu-v6-free-install.log
 CONSOLE_USER=$(stat -f%Su /dev/console)
 
 cd "$PKG" || exit 1
-SUDO_USER="$CONSOLE_USER" ./install.sh "$PKG/sing-box" "$PKG" > "$LOG" 2>&1
+./neu-v6-free install --from "$PKG" --user "$CONSOLE_USER" > "$LOG" 2>&1
 code=$?
 chmod 644 "$LOG"
 if [ $code -eq 0 ]; then

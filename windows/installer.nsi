@@ -1,7 +1,8 @@
 ; Windows 安装程序（setup.exe）。由 cli.js --package 用 makensis 编译：
 ;   makensis -DVERSION=<版本> -DSRC=<安装包目录> -DOUTFILE=<输出> windows/installer.nsi
-; 它把安装包目录（脚本、面板、规则集、自带的 sing-box）解压到临时目录，运行 install.ps1 完成真正的安装
-; （装到 C:\neu-v6-free、注册开机任务、自检，不通自动撤回），再在「设置 → 应用」里登记卸载。
+; 它把安装包目录（本地助手 neu-v6-free.exe、面板、规则集、App、自带的 sing-box）解压到临时目录，
+; 运行 neu-v6-free.exe install 完成真正的安装（装到 C:\neu-v6-free、注册 Windows 服务、自检，不通就暂停 sing-box），
+; 再在「设置 → 应用」里登记卸载。
 Unicode true
 !include MUI2.nsh
 !include LogicLib.nsh
@@ -25,7 +26,7 @@ BrandingText "neu-v6-free ${VERSION}"
 !define MUI_WELCOMEPAGE_TEXT "让能走 IPv6 的流量都走 IPv6（校园网不计费），并带一个网页面板：管理订阅和节点、切换线路、按网站改规则。$\r$\n$\r$\n\
 安装前请先退出其他代理软件（Clash Verge、FlClash、v2rayN……，托盘图标右键退出），包括它们的 TUN 模式。$\r$\n$\r$\n\
 • 装到 C:\neu-v6-free，开机自动运行，自带 sing-box 内核。$\r$\n\
-• 装完会自检能不能上网，不通就自动撤回，电脑恢复原样。$\r$\n\
+• 装完会自检能不能上网，不通就暂停，电脑回到普通网络。$\r$\n\
 • 通过后自动打开「${APPNAME}」：窗口里是面板，右下角托盘有 v6 图标。$\r$\n\
 • 以后的新版本在面板「设置」里一键更新。"
 !insertmacro MUI_PAGE_WELCOME
@@ -63,11 +64,14 @@ Section "Install"
   SetOutPath "$PLUGINSDIR\pkg"
   File /r "${SRC}/*"
   DetailPrint "正在安装并自检能不能上网（最多一两分钟）……"
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\pkg\install.ps1" -NoPause'
+  nsExec::ExecToLog '"$PLUGINSDIR\pkg\neu-v6-free.exe" install --from "$PLUGINSDIR\pkg" --no-pause'
   Pop $0
   SetOutPath "$TEMP"  ; 离开解压目录，安装程序退出时才能删掉它
-  ${If} $0 != 0
-    MessageBox MB_ICONSTOP|MB_OK "安装没有完成，网络已经恢复原样。$\r$\n$\r$\n原因见安装窗口里的详细信息（常见：别的代理软件还开着、端口被占用、不在校园网）。处理后重新运行安装程序即可。"
+  ; 1：没装上；2：装好了但自检没通过，sing-box 暂停着（照样登记卸载，App 里能看原因、重新启用）
+  ${If} $0 == 2
+    MessageBox MB_ICONEXCLAMATION|MB_OK "装好了，但自检没通过：已暂停 sing-box，网络恢复原样。$\r$\n$\r$\n原因见安装窗口里的详细信息（常见：不在校园网、别的代理软件还开着 TUN）。处理后在 App 的状态页点「重新启用」，或者重新运行安装程序。"
+  ${ElseIf} $0 != 0
+    MessageBox MB_ICONSTOP|MB_OK "安装没有完成，网络已经恢复原样。$\r$\n$\r$\n原因见安装窗口里的详细信息（常见：别的代理软件还开着、端口被占用）。处理后重新运行安装程序即可。"
     Abort "安装没有完成"
   ${EndIf}
   ; 卸载信息：设置 → 应用、控制面板「程序和功能」里都能看到
@@ -81,20 +85,20 @@ Section "Install"
   WriteRegStr HKLM "${REGKEY}" "DisplayIcon" "${TARGET}\app\neu-v6-free.exe"
   WriteRegDWORD HKLM "${REGKEY}" "NoModify" 1
   WriteRegDWORD HKLM "${REGKEY}" "NoRepair" 1
-  ; 开始菜单、桌面的入口由 install.ps1 建（指向 C:\neu-v6-free\app\neu-v6-free.exe），zip 手动安装时也有
+  ; 开始菜单、桌面的入口由 neu-v6-free.exe install 建（指向 C:\neu-v6-free\app\neu-v6-free.exe），zip 手动安装时也有
 SectionEnd
 
 Section "Uninstall"
   MessageBox MB_YESNO|MB_ICONQUESTION "同时删除订阅、设置、「我的规则」和流量统计吗？$\r$\n$\r$\n选「否」会保留它们，重新安装后接着用。" IDYES purge
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "${TARGET}\uninstall.ps1" -NoPause'
+  nsExec::ExecToLog '"${TARGET}\neu-v6-free.exe" uninstall --no-pause'
   Goto done
   purge:
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "${TARGET}\uninstall.ps1" -NoPause -Purge'
+  nsExec::ExecToLog '"${TARGET}\neu-v6-free.exe" uninstall --no-pause --purge'
   done:
   Pop $0
   DeleteRegKey HKLM "${REGKEY}"
   SetShellVarContext all
-  Delete "$SMPROGRAMS\${APPNAME}.url"  ; 1.1.0 及以前的开始菜单入口；新的 .lnk 由 uninstall.ps1 删
+  Delete "$SMPROGRAMS\${APPNAME}.url"  ; 1.1.0 及以前的开始菜单入口；新的 .lnk 由 neu-v6-free.exe uninstall 删
   Delete "${TARGET}\${UNINSTALLER}"
   RMDir "${TARGET}"  ; 空了才删（保留了订阅和规则时目录还在）
 SectionEnd

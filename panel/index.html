@@ -117,7 +117,7 @@
 <body>
 <div id="root"></div>
 <script>
-// 面板直接调 sing-box 的 Clash API（切换分组、测延迟、实时连接）；「我的规则」和流量统计走本地助手（mac/helper.py、windows/helper.ps1）。
+// 面板直接调 sing-box 的 Clash API（切换分组、测延迟、实时连接）；「我的规则」和流量统计走本地助手（neu-v6-free run）。
 const API = location.origin;
 const DELAY_URL = "https://www.gstatic.com/generate_204";
 const ENTRY_OFF = "不用服务器（离校时选）";
@@ -463,8 +463,8 @@ function targetSelect(value) {
 const targetDesc = (id) => (meta.user_targets || []).find((t) => t.id === id)?.desc || "";
 
 function helperHelp() {
-  if (meta.platform === "windows") return "双击生成的 Windows 文件夹里的 update.bat（会顺便升级本地助手），不行就双击 install.bat 重新安装一次；助手的日志在 C:\\neu-v6-free\\helper.log。";
-  if (meta.platform === "mac") return "重新运行一次更新脚本（mac/update.sh，或自用配置里的 ./update.sh）就会装上，或单独运行 sudo mac/helper-service.sh。";
+  if (meta.platform === "windows") return "重新运行一次安装程序（setup.exe，订阅和设置会保留）；本地助手是 Windows 服务「校园网 v6 免流」，日志在 C:\\neu-v6-free\\helper.log。";
+  if (meta.platform === "mac") return "重新运行一次安装程序（.pkg，订阅和设置会保留），或运行 sudo launchctl kickstart -k system/local.neu-v6-free；日志在 /usr/local/var/neu-v6-free/helper.log。";
   return "这个平台没有本地助手：在配置文件里写 custom_rules，重新生成后导入。";
 }
 
@@ -812,7 +812,7 @@ function renderHelp() {
   const qa = [
     ["某个网站打不开 / 很慢 / 提示海外用户", "打开「实时连接」，搜索这个网站，看「实际出口」。点「改规则」换一个去向，比如改成「直连（v6 优先）」。"],
     ["我的选择会保存吗？", "会。分组里的选择存在 sing-box 的缓存里，重启电脑后保持；「我的规则」存在规则目录的 user-rules.json。"],
-    ["什么时候需要重新生成配置？", "只有换了订阅、服务器，或改了设置文件（config.yaml）时：重新生成后运行更新脚本（macOS 是 mac/update.sh，Windows 是 update.ps1），不需要管理员密码。切换分组、加规则都是即时生效的。"],
+    ["什么时候需要重新生成配置？", "只有换了订阅、服务器，或改了设置文件（config.yaml）时：重新生成后运行更新脚本（macOS 是 mac/update.sh，Windows 是 update.bat），不需要管理员密码。切换分组、加规则都是即时生效的。"],
     ...(tunnel ? [["离开校园网（没有 IPv6）怎么办？", `在「免流服务器」里选「${ENTRY_OFF}」，所有经服务器的流量改为直连。`],
       ["服务器流量快用完了", "在「免流服务器」里换一台服务器；YouTube、Steam 这类大流量的分组可以临时改成「直连（v6 优先）」。"]] : []),
     ["装了以后上不了网怎么办？", "不会一直断：本地助手每 30 秒检查一次，「经 sing-box 上不了网、绕过它能上」连续 3 次就自动暂停 sing-box，电脑回到普通网络。也可以在「概览」点「暂停」，或打开 http://127.0.0.1:9091/ 暂停 / 重新启用。"],

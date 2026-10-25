@@ -1,13 +1,13 @@
 // 网页生成器：全部在浏览器里完成，不上传任何内容。与命令行共用 lib/ 里的生成逻辑。
 import yaml from "../lib/js-yaml.mjs";
-import { DEFAULTS, build, rsTag, ruleSetRefs, ruleSetUrl } from "../lib/build.js";
+import { build } from "../lib/build.js";
 import { ABROAD, CN4, ENTRY } from "../lib/groups.js";
-import { makeZip } from "./zip.js";
 
 const $ = (id) => document.getElementById(id);
 const STORE = "neu-v6-free-inputs";
 const FIELDS = ["server", "sub", "advanced"];
-const PLATFORM_NAMES = { mac: "macOS（sing-box App）", windows: "Windows（安装包）", android: "Android", ios: "iOS" };
+// 电脑（Windows / macOS 想开机常驻、带面板）用安装程序，订阅在面板里加；这里给 sing-box 官方 App 生成配置
+const PLATFORM_NAMES = { mac: "macOS（sing-box App）", android: "Android", ios: "iOS" };
 
 let parsed = null; // { settings, proxies }
 let choices = {}; // 分组名 → 用户选的默认出口
@@ -105,68 +105,12 @@ function download(name, blob) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-let panelHtml = null;
-async function getPanelHtml() {
-  panelHtml ??= await (await fetch("../panel/index.html")).text();
-  return panelHtml;
-}
-// 面板在浏览器里生成配置要用的模块（订阅与节点、设置页），随面板一起装进 panel/lib/
-const PANEL_LIB = ["js-yaml.mjs", "groups.js", "convert.js", "subscription.js", "build.js"];
-let panelLib = null;
-async function getPanelLib() {
-  panelLib ??= await Promise.all(PANEL_LIB.map(async (n) => ({ name: `neu-v6-free/panel/lib/${n}`, data: await (await fetch(`../lib/${n}`)).text() })));
-  return panelLib;
-}
-
-// Windows 脚本按字节取：它们带 UTF-8 BOM（Windows 自带的 PowerShell 5.1 靠它识别中文），按文本读会丢掉
-const WINDOWS_SCRIPTS = ["install.ps1", "update.ps1", "uninstall.ps1", "helper.ps1", "install.bat", "update.bat", "uninstall.bat"];
-let windowsScripts = null;
-
-// 规则集从 GitHub 下载（raw.githubusercontent.com 允许跨域），装进 zip 的 rules/
-async function getRuleSets(settings) {
-  const base = settings.rule_set_base || DEFAULTS.rule_set_base;
-  const refs = ruleSetRefs("windows", settings);
-  const out = [];
-  for (const [i, ref] of refs.entries()) {
-    $("secret").textContent = `正在下载规则集 ${i + 1} / ${refs.length}……`;
-    const r = await fetch(ruleSetUrl(base, ref));
-    if (!r.ok) throw new Error(`规则集下载失败：${ref}（HTTP ${r.status}）`);
-    out.push({ name: `neu-v6-free/rules/${rsTag(ref)}.srs`, data: new Uint8Array(await r.arrayBuffer()) });
-  }
-  return out;
-}
-async function getWindowsScripts() {
-  windowsScripts ??= await Promise.all(WINDOWS_SCRIPTS.map(async (n) => ({
-    name: `neu-v6-free/${n}`, data: new Uint8Array(await (await fetch(`../windows/${n}`)).arrayBuffer()) })));
-  return windowsScripts;
-}
-
 async function generate(platform) {
   const settings = withChoices();
   if (platform === "mac") settings.mac_app = true;
-  const { config, panel } = build(settings, parsed.proxies, platform);
+  const { config } = build(settings, parsed.proxies, platform);
   const json = JSON.stringify(config, null, 2);
-  if (platform === "windows") {
-    const zip = makeZip([
-      { name: "neu-v6-free/config.json", data: json },
-      { name: "neu-v6-free/panel/index.html", data: await getPanelHtml() },
-      { name: "neu-v6-free/panel/groups.json", data: JSON.stringify(panel, null, 1) },
-      ...await getPanelLib(),
-      // 面板里「订阅与节点」「设置」接着用的数据：这次的设置和节点（不单独成组、不排除节点，和这份配置一样）
-      { name: "neu-v6-free/profile.json", data: JSON.stringify({ version: 1, settings, nodes: [], pending: false,
-        subscriptions: parsed.proxies.length ? [{ id: "web", name: "订阅", url: "", enabled: true, group: false, exclude: "", proxies: parsed.proxies }] : [] }) },
-      // 本地规则集：Windows 版启动不依赖网络（服务器不通时也能起来）
-      ...await getRuleSets(settings),
-      // 「我的规则」的空文件：install.ps1 只补缺的，不覆盖已有规则
-      ...config.route.rule_set.filter((r) => r.tag.startsWith("user-"))
-        .map((r) => ({ name: `neu-v6-free/rules/${r.tag}.json`, data: '{"version":2,"rules":[]}\n' })),
-      ...await getWindowsScripts(),
-    ]);
-    download("neu-v6-free-windows.zip", zip);
-    $("secret").textContent = `Windows 面板密钥：${settings.clash_api_secret}（面板 http://127.0.0.1:9090/ui 登录用，也在 config.json 里）`;
-  } else {
-    download(`neu-v6-free-${platform}.json`, new Blob([json], { type: "application/json" }));
-  }
+  download(`neu-v6-free-${platform}.json`, new Blob([json], { type: "application/json" }));
   return json;
 }
 

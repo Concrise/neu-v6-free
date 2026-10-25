@@ -21,8 +21,7 @@
 
 | 组件 | 是什么 |
 |---|---|
-| `com.nk.neu-v6-router`（LaunchDaemon） | sing-box（从 v2rayN 拷出来的），配置 `/usr/local/etc/neu-v6-router/config.json`，含 TUN |
-| `com.nk.neu-v6-router.helper`（LaunchDaemon） | 本地助手 `127.0.0.1:9091`：我的规则、流量统计、免 sudo 更新 |
+| `com.nk.neu-v6-router`（LaunchDaemon） | 本地助手 `neu-v6-free run`（`127.0.0.1:9091`：我的规则、流量统计、免 sudo 更新），由它启动并看着 sing-box（从 v2rayN 拷出来的，配置 `/usr/local/etc/neu-v6-router/config.json`，含 TUN） |
 | `com.nk.neu-v6-monitor`（LaunchAgent） | 每 30 分钟跑一次 `personal/v6monitor.sh`，日志 `out/v6monitor.log` |
 
 端口：10808 普通代理；10809-10811 各固定一条 HK 家宽（给指纹浏览器）；10812 本机直连 v4；面板 `http://127.0.0.1:9090/ui`。
@@ -58,7 +57,7 @@ node ../cli.js -c profile.yaml -c config.local.yaml -p mac -o /tmp/x
    ```
 
 5. 第一次：退出 FlClash（托盘右键退出），双击 `out\windows\install.bat`，管理员确认点「是」。
-   装到 `C:\neu-v6-free`，开机自启，装完会自检，不通会自动撤回。面板同样是 `http://127.0.0.1:9090/ui`，状态页 `http://127.0.0.1:9091/`。
+   装到 `C:\neu-v6-free`，开机自启，装完会自检，不通会暂停 sing-box、回到普通网络。面板同样是 `http://127.0.0.1:9090/ui`，状态页 `http://127.0.0.1:9091/`。
 6. 以后改了设置：重新生成，双击 `out\windows\update.bat`（不需要管理员）。
 
 注意 `profile.yaml` 里的 `rules_dir` / `panel_dir` 是 Mac 的路径，Windows 用的是 `windows_rules_dir` / `windows_panel_dir`（默认 `C:/neu-v6-free/…`），互不影响。

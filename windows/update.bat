@@ -1,3 +1,4 @@
 @echo off
-rem Apply a newly generated config (no admin needed). Double-click to run.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0update.ps1" %*
+rem Apply a newly generated config to the installed helper (no admin needed). Double-click to run.
+"%~dp0neu-v6-free.exe" apply "%~dp0."
+pause

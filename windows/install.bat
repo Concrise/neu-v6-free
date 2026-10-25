@@ -1,3 +1,3 @@
 @echo off
-rem First-time install (asks for admin once). Double-click to run.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
+rem Install or upgrade (asks for admin once). Double-click to run.
+"%~dp0neu-v6-free.exe" install %*

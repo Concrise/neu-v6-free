@@ -363,7 +363,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelega
         <h2>本地服务没有响应</h2>
         <p>sing-box 和本地助手都连不上，可能正在重启，或者没装好。这个窗口会自动重试。</p>
         <p>一直这样的话：重新运行安装包；或在终端运行
-        <code>sudo launchctl kickstart -k system/local.neu-v6-free.helper</code>。</p>
+        <code>sudo launchctl kickstart -k system/local.neu-v6-free</code>。</p>
         """
 
     func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) {

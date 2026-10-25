@@ -1,5 +1,5 @@
 // 「校园网 v6 免流」的 Windows 外壳：一个窗口（里面是本机面板 http://127.0.0.1:9090/ui，用 WebView2 显示）+ 托盘图标
-// （运行状态、暂停 / 重新启用、今天的流量）。真正干活的是 sing-box 和本地助手（SYSTEM 计划任务），
+// （运行状态、暂停 / 重新启用、今天的流量）。真正干活的是 sing-box 和本地助手（以 SYSTEM 运行的 Windows 服务），
 // 这个程序只是界面：退出它不影响免流。和 mac/app/main.swift 做的事一样。
 using System;
 using System.Collections.Generic;
