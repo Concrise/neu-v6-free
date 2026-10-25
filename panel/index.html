@@ -134,6 +134,7 @@
   .hero .txt { flex: 1 1 280px; }
   .hero h1 { font-size: 28px; line-height: 1.25; }
   .hero .txt div { color: var(--muted); }
+  .hero-mode { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
   .hero-note { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
   .stat { display: flex; flex-direction: column; gap: 6px; }
@@ -411,7 +412,9 @@ function renderHome() {
   const fb = helper.server_fallback;
   const hero = $(`<section class="card big" aria-label="运行状态"><div class="hero ${fb ? "warn" : ""}"><div class="ring"><i></i></div>
     <div class="txt"><h1>${fb ? "正在免流 · 离校模式" : "正在免流"}</h1><div>${fb ? "连不上你的服务器，原本经服务器的流量暂时直接连出去（计费）。"
-      : tunnel ? "有 IPv6 的网站走 IPv6，其余经你的服务器出去，都不计费。" : "有 IPv6 的网站走 IPv6，不计费；只有 IPv4 的照常计费。"}</div></div></div></section>`);
+      : tunnel ? "有 IPv6 的网站走 IPv6，其余经你的服务器出去，都不计费。" : "有 IPv6 的网站走 IPv6，不计费；只有 IPv4 的照常计费。"}</div>
+      <div class="hero-mode"><span class="badge ${tunnel ? "b-free" : "b-mix"}">${tunnel ? "模式二 · 自带服务器" : "模式一 · 只省 IPv6"}</span>
+        <span class="hint">${tunnel ? "只有 IPv4 的网站也经你的服务器出去" : "不用服务器；没有自己的服务器用这个就够了"}</span><a class="small" href="#/settings">切换</a></div></div></div></section>`);
   if (helper.ok && helper.error !== "old") {
     const pause = $(`<button class="btn big">暂停</button>`);
     pause.onclick = async () => {
@@ -529,12 +532,13 @@ function renderWelcome() {
   }
 
   if (w.step === 2) {
-    title("你手上有什么？", "选一个最接近的。以后随时能在「订阅与节点」「设置」里改。");
+    title("你手上有什么？", "没有自己的服务器，选前两个（模式一）就够了。以后随时能在「设置 → 运行方式」里改。");
     const list = $(`<div class="sec" role="radiogroup" aria-label="你手上有什么"></div>`);
-    for (const [id, t, d] of [["none", "什么都没有", "只省有 IPv6 的那部分。国外网站打不开。"], ["sub", "机场订阅", "还能上国外网站。粘贴一个订阅链接就行。"],
-      ["server", "自己的服务器（有 IPv6 的 VPS）", "只有 IPv4 的网站也免费，国外网站也走它。要先在服务器上运行一次部署脚本。"]]) {
+    for (const [id, t, d, tag] of [["none", "什么都没有", "只省有 IPv6 的那部分。国外网站打不开。", "模式一"],
+      ["sub", "机场订阅", "还能上国外网站。粘贴一个订阅链接就行。", "模式一 + 订阅"],
+      ["server", "自己的服务器（有 IPv6 的 VPS）", "只有 IPv4 的网站也免费，国外网站也走它。要先在服务器上运行一次部署脚本。", "模式二"]]) {
       const b = $(`<button type="button" role="radio" aria-checked="${w.choice === id}" class="chip ${w.choice === id ? "on" : ""}" style="width:100%;padding:14px 20px">
-        <span class="tt"><b style="font-size:16px">${t}</b><span style="font-size:14px">${d}</span></span></button>`);
+        <span class="tt"><b style="font-size:16px">${t}<span class="badge b-muted" style="margin-left:8px;vertical-align:2px">${tag}</span></b><span style="font-size:14px">${d}</span></span></button>`);
       b.onclick = () => { if (w.choice !== id) { w.choice = id; w.found = null; w.text = ""; } redraw(); };
       list.append(b);
     }
@@ -1470,11 +1474,14 @@ function renderSubs() {
 }
 
 // ---------- 设置 ----------
+let wantServer = false;  // 模式一时点了「模式二」：先显示加服务器的地方，加好才算换过去
+
 function renderSettings() {
   const m = main();
   m.append(head("设置", "平时不用来这里。改了运行方式、服务器或端口要点「应用」。"));
+  modeSection(m);
   const ok = needClient(m);
-  if (ok) settingsMain(m);
+  if (ok) proxySection(m);
   renderUpdate(m);
 
   const tools = [["conn", "实时连接", "每条连接实际从哪儿出去；走得不对可以直接改规则"], ["traffic", "流量明细", "按天、按月、按服务器看免费和计费流量"],
@@ -1503,39 +1510,75 @@ function renderSettings() {
   m.append(more);
 }
 
-/** 运行方式、免流服务器、本机代理 */
-function settingsMain(m) {
-  const p = prof(), s = p.settings;
-  const servers = s.entry_servers || {};
-  const ids = Object.keys(servers);
-
-  const sec = $(`<section class="sec" aria-labelledby="mode-h"><h2 id="mode-h">运行方式</h2><div class="pick" role="radiogroup" aria-label="运行方式"></div></section>`);
+/** 运行方式：模式一（只省 IPv6，不用服务器）/ 模式二（自带服务器）。总是显示，命令行生成的配置也能看到现在是哪种 */
+function modeSection(m) {
+  const p = prof(), s = p?.settings;
+  const servers = s?.entry_servers || {}, ids = Object.keys(servers);
+  const running = meta.mode === "tunnel";        // 现在运行的配置
+  const chosen = p ? ids.length > 0 : running;   // 面板里的设置（点「应用」后生效）
+  const editable = !!(helper.client && p);
+  const two = chosen || (editable && wantServer);
+  const sec = $(`<section class="sec" aria-labelledby="mode-h"><div class="sec-head"><div><h2 id="mode-h">运行方式</h2>
+    <p>没有自己的服务器，用模式一就够了；有一台带 IPv6 的 VPS，再换模式二。</p></div></div><div class="pick" role="radiogroup" aria-label="运行方式"></div></section>`);
   const pick = sec.querySelector(".pick");
   const opt = (on, t, d, fn) => {
     const b = $(`<button type="button" role="radio" aria-checked="${on}" class="chip ${on ? "on" : ""}"><b>${t}</b><span>${d}</span></button>`);
     b.onclick = fn;
+    b.disabled = !editable;
     pick.append(b);
   };
-  const srvBox = $(`<div class="list"></div>`);
-  opt(!ids.length, "只省 IPv6", "不用服务器。有 IPv6 的网站免费，只有 IPv4 的照常计费。", () => {
-    if (!ids.length) return;
-    if (!confirm("删掉全部免流服务器、回到只省 IPv6？服务器的节点还留在「订阅与节点」里。")) return;
-    s.entry_servers = {};
-    changed("已改为只省 IPv6，点「应用」后生效");
+  opt(!two, "模式一 · 只省 IPv6", "不用服务器，装好就能用。有 IPv6 的网站免费，只有 IPv4 的照常计费；加了机场订阅也能上国外网站。", () => {
+    if (ids.length) {
+      if (!confirm("删掉全部免流服务器、换回模式一？服务器的节点还留在「订阅与节点」里。")) return;
+      s.entry_servers = {};
+      wantServer = false;
+      changed("已换回模式一，点「应用」后生效");
+    } else { wantServer = false; render(); }
   });
-  opt(!!ids.length, "用自己的服务器", "只有 IPv4 的网站经服务器出去，也免费。需要一台有 IPv6 的 VPS。", () => {
-    if (!ids.length) srvBox.querySelector(".v6")?.focus();
+  opt(two, "模式二 · 自带服务器", "只有 IPv4 的网站也经你的服务器出去，不计费。需要一台有 IPv6 的 VPS，先在上面运行一次部署脚本。", () => {
+    if (!ids.length && !wantServer) { wantServer = true; render(); }
   });
+  if (!helper.client) sec.append($(`<p class="hint" style="margin:0">现在是${running ? "模式二" : "模式一"}。连不上本地助手，不能在这里切换。</p>`));
+  else if (!p) sec.append($(`<p class="hint" style="margin:0">现在是${running ? "模式二" : "模式一"}。这份配置是用命令行生成的（或者刚装好）：要在这里切换，先点下面的「开始」。</p>`));
+  else if (chosen !== running) sec.append($(`<p class="hint" style="margin:0">现在运行的是${running ? "模式二" : "模式一"}，点页面上方的「应用」后换成${chosen ? "模式二" : "模式一"}。</p>`));
+  if (editable && two) sec.append(serverBox(p, s, servers, ids));
+  m.append(sec);
+}
 
+/** 模式二的服务器：已有的列表；加服务器（粘贴部署脚本的输出，或从已有节点里选） */
+function serverBox(p, s, servers, ids) {
+  const box = $(`<div class="list"></div>`);
   for (const id of ids) {
     const v = servers[id];
     const li = $(`<div class="li"><div class="main"><div class="t">${esc(v.label)}</div><div class="d mono">${esc(id)} · ${esc(v.v6)}</div></div>
       <label class="check"><input type="checkbox" ${v.landing ? "checked" : ""}>也当国外线路用</label><button class="btn small ghost">删除</button></div>`);
     li.querySelector("input").onchange = (e) => { v.landing = e.target.checked; changed(); };
-    li.querySelector("button").onclick = () => { delete servers[id]; s.entry_servers = servers; changed(); };
-    srvBox.append(li);
+    li.querySelector("button").onclick = () => {
+      if (ids.length === 1 && !confirm("删掉最后一台服务器就换回模式一。确定？")) return;
+      delete servers[id]; s.entry_servers = servers; changed();
+    };
+    box.append(li);
   }
-  // 加服务器：节点要先在「订阅与节点」里（订阅或手动添加都行），这里选中它，填上它的 IPv6 地址
+  // 粘贴 server/setup.sh 最后输出的那一段：节点和服务器的 IPv6 都在里面
+  const paste = $(`<div class="li" style="flex-direction:column;align-items:stretch;gap:10px">
+    <div class="t">${ids.length ? "再加一台服务器" : "加服务器"}</div>
+    <div class="hint">在服务器上运行一次 <span class="mono">bash setup.sh</span>（见文档 docs/server.md），把最后输出的那一整段粘到这里：</div>
+    <textarea class="mono" rows="5" aria-label="部署脚本的输出" placeholder="entry_servers: …"></textarea>
+    <div class="row"><button class="btn primary">添加</button><span class="hint grow"></span></div></div>`);
+  const hint = paste.querySelector(".row .hint");
+  paste.querySelector("button").onclick = async () => {
+    const r = (await lib()).parseSubscription(paste.querySelector("textarea").value);
+    const srv = r.settings?.entry_servers;
+    if (!srv) { hint.textContent = r.proxies.length ? "认出了节点，但没有服务器的 IPv6 地址：请粘贴 setup.sh 最后输出的那一整段" : (r.errors[0] || "没有认出内容"); hint.classList.add("err"); return; }
+    const names = new Set(p.nodes.map((x) => x.name));
+    p.nodes.push(...r.proxies.filter((x) => !names.has(x.name)));
+    s.entry_servers = { ...servers, ...srv };
+    if (r.settings.entry_default) s.entry_default = r.settings.entry_default;
+    wantServer = false;
+    changed(`已加「${Object.values(srv).map((x) => x.label).join("、")}」，点「应用」后换成模式二`);
+  };
+  box.append(paste);
+  // 节点已经在「订阅与节点」里（订阅或手动添加都行）：选中它，填上服务器的 IPv6 地址
   const cand = new Map();
   if (!neuLib) lib().then(() => route().page === "settings" && render()).catch(() => { });
   // 和生成配置时一样取节点（停用的订阅、被排除的「剩余流量」之类不算）
@@ -1543,33 +1586,37 @@ function settingsMain(m) {
   for (const x of all) {
     if (x.server && /^[\d.]+$/.test(x.server) && !servers[x.server] && !cand.has(x.server)) cand.set(x.server, x.name);
   }
-  const addSrv = $(`<div class="li" style="flex-direction:column;align-items:stretch;gap:10px">
-    <div class="hint">${ids.length ? "再加一台：" : ""}服务器上先运行部署脚本，把输出粘到「订阅与节点 → 节点或服务器」最省事（会自动加到这里）。也可以从已有的节点里选，填上服务器的 IPv6 地址：</div>
-    <div class="row"><select class="srv grow" aria-label="服务器的节点">${[...cand].map(([ip, n]) => `<option value="${esc(ip)}">${esc(ip)}（${esc(n)}）</option>`).join("")}
+  const manual = $(`<details class="li" style="display:block"><summary class="small">其他办法：服务器的节点已经在「订阅与节点」里了，手动指定</summary>
+    <div class="row" style="margin-top:10px"><select class="srv grow" aria-label="服务器的节点">${[...cand].map(([ip, n]) => `<option value="${esc(ip)}">${esc(ip)}（${esc(n)}）</option>`).join("")}
       <option value="">手动填节点地址……</option></select>
       <input type="text" class="ip mono" placeholder="节点的 IPv4 地址" aria-label="节点的 IPv4 地址" style="width:160px;display:${cand.size ? "none" : ""}">
       <input type="text" class="v6 mono" placeholder="服务器的 IPv6 地址" aria-label="服务器的 IPv6 地址" style="width:220px">
-      <input type="text" class="lb" placeholder="名字，如 港机" aria-label="服务器名字" style="width:130px"><button class="btn primary">加为免流服务器</button></div>
-    <div class="hint">只认 Hysteria2、TUIC、VLESS Reality、AnyTLS 这几种节点；服务器的入站要监听 ::（IPv6）。</div></div>`);
-  const sel = addSrv.querySelector(".srv"), ipIn = addSrv.querySelector(".ip");
+      <input type="text" class="lb" placeholder="名字，如 港机" aria-label="服务器名字" style="width:130px"><button class="btn">加为免流服务器</button></div>
+    <div class="hint" style="margin-top:8px">只认 Hysteria2、TUIC、VLESS Reality、AnyTLS 这几种节点；服务器的入站要监听 ::（IPv6）。</div></details>`);
+  const sel = manual.querySelector(".srv"), ipIn = manual.querySelector(".ip");
   sel.onchange = () => { ipIn.style.display = sel.value ? "none" : ""; };
-  addSrv.querySelector("button").onclick = () => {
-    const ip = sel.value || ipIn.value.trim(), v6 = addSrv.querySelector(".v6").value.trim(), label = addSrv.querySelector(".lb").value.trim();
+  manual.querySelector("button").onclick = () => {
+    const ip = sel.value || ipIn.value.trim(), v6 = manual.querySelector(".v6").value.trim(), label = manual.querySelector(".lb").value.trim();
     if (!/^[\d.]+$/.test(ip)) return toast("节点地址要填 IPv4");
     if (!v6.includes(":")) return toast("请填服务器的 IPv6 地址");
     if (!label) return toast("请起个名字");
     s.entry_servers = { ...servers, [ip]: { v6, label } };
-    changed(`已加「${label}」，点「应用」后生效`);
+    wantServer = false;
+    changed(`已加「${label}」，点「应用」后换成模式二`);
   };
-  srvBox.append(addSrv);
-  sec.append(srvBox);
-  m.append(sec);
+  box.append(manual);
+  return box;
+}
 
+/** 本机代理端口；模式二时订阅的节点要不要先经服务器 */
+function proxySection(m) {
+  const s = prof().settings;
+  const ids = Object.keys(s.entry_servers || {});
   const other = $(`<section class="sec" aria-labelledby="proxy-h"><h2 id="proxy-h">本机代理</h2><div class="list">
     <div class="li"><label class="main" for="port"><div class="t">代理端口</div>
       <div class="d">大部分程序不用设。命令行工具、浏览器插件要代理时填 127.0.0.1 和这个端口（HTTP、SOCKS5 都行）。</div></label>
       <input type="text" id="port" class="port mono" inputmode="numeric" style="width:110px"></div>
-    <div class="li via-li" style="display:${ids.length ? "flex" : "none"}"><label class="check main"><input type="checkbox" class="via">
+    <div class="li" style="display:${ids.length ? "flex" : "none"}"><label class="check main"><input type="checkbox" class="via">
       订阅里的节点先经免流服务器再出去（免费）。关掉 = 校园网 IPv4 直接连节点（计费，延迟低）</label></div></div></section>`);
   const port = other.querySelector(".port");
   port.value = s.main_port ?? client.defaults.main_port ?? "";

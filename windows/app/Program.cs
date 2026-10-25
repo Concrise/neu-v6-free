@@ -50,7 +50,6 @@ namespace NeuV6Free
             Directory.CreateDirectory(Data);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            PanelForm.AllowDarkMode();
             Application.Run(new App(show, args.Contains("--background")));
         }
 
@@ -412,32 +411,9 @@ code{font:13px Consolas,monospace}</style>
         }
 
         // ---------- 深色模式 ----------
-        // 页面自己按 prefers-color-scheme 换颜色（WebView2 跟着系统），但标题栏是 Windows 画的：要自己告诉它用深色
+        // 页面自己按 prefers-color-scheme 换颜色（WebView2 跟着系统）；窗口的底色、边框也跟着
 
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
-        // Windows 10 上只设 DWM 的属性不够（实测标题栏还是白的）：还要用 uxtheme 里没公开的函数允许程序和窗口用深色，
-        // 再用 SetWindowCompositionAttribute 告诉它标题栏用深色（做法同 github.com/ysc3839/win32-darkmode）
-        [DllImport("uxtheme.dll", EntryPoint = "#135")] static extern int SetPreferredAppMode(int mode);  // 1809 里是 AllowDarkModeForApp(bool)
-        [DllImport("uxtheme.dll", EntryPoint = "#133")] static extern bool AllowDarkModeForWindow(IntPtr hwnd, bool allow);
-        [DllImport("user32.dll")] static extern bool SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionData data);
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool SetProp(IntPtr hwnd, string name, IntPtr data);
-        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wp, IntPtr lp);
-        [DllImport("ntdll.dll")] static extern void RtlGetNtVersionNumbers(out int major, out int minor, out int build);
-        [StructLayout(LayoutKind.Sequential)] struct WindowCompositionData { public int Attrib; public IntPtr Data; public IntPtr Size; }
-
-        /// <summary>Windows 的版本号（程序没有声明支持 Windows 10 时 Environment.OSVersion 报的是 6.2，不能用）</summary>
-        static readonly int Build = GetBuild();
-        static int GetBuild()
-        {
-            try { RtlGetNtVersionNumbers(out _, out _, out int b); return b & 0xFFFF; } catch { return 0; }
-        }
-
-        /// <summary>程序启动时调用一次（Windows 10 1809 起才有）</summary>
-        public static void AllowDarkMode()
-        {
-            if (Build < 17763) return;
-            try { SetPreferredAppMode(1); } catch { }  // 1 = AllowDark（1809 里是 true）
-        }
 
         /// <summary>「设置 → 个性化 → 颜色 → 选择默认应用模式」选了深色</summary>
         static bool SystemDark()
@@ -454,41 +430,144 @@ code{font:13px Consolas,monospace}</style>
         {
             bool dark = SystemDark();
             int on = dark ? 1 : 0;
-            if (Build >= 17763 && Build < 22000)
-            {
-                try
-                {
-                    AllowDarkModeForWindow(Handle, dark);
-                    if (Build < 18362) SetProp(Handle, "UseImmersiveDarkModeColors", (IntPtr)on);
-                    else
-                    {
-                        var mem = Marshal.AllocHGlobal(sizeof(int));
-                        Marshal.WriteInt32(mem, on);
-                        var data = new WindowCompositionData { Attrib = 26, Data = mem, Size = (IntPtr)sizeof(int) };  // 26 = WCA_USEDARKMODECOLORS
-                        SetWindowCompositionAttribute(Handle, ref data);
-                        Marshal.FreeHGlobal(mem);
-                    }
-                }
-                catch { }
-            }
-            // 20 = DWMWA_USE_IMMERSIVE_DARK_MODE（Windows 10 20H1 起、Windows 11）；更早的 Windows 10 用 19
+            // 20 = DWMWA_USE_IMMERSIVE_DARK_MODE（Windows 11 上边框跟着变深）；更早的 Windows 10 用 19，没有也没关系
             if (DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int)) != 0) DwmSetWindowAttribute(Handle, 19, ref on, sizeof(int));
-            // 窗口已经显示时 Windows 10 不会自己重画标题栏：按当前是否在前台重新「激活」一次
-            if (Visible)
-            {
-                bool active = ActiveForm == this;
-                SendMessage(Handle, 0x0086, (IntPtr)(active ? 0 : 1), IntPtr.Zero);  // WM_NCACTIVATE
-                SendMessage(Handle, 0x0086, (IntPtr)(active ? 1 : 0), IntPtr.Zero);
-            }
             // 页面加载出来之前的底色，免得深色模式下先白一下
-            BackColor = dark ? Color.FromArgb(20, 22, 27) : Color.FromArgb(245, 246, 248);
+            BackColor = dark ? Color.FromArgb(17, 19, 24) : Color.FromArgb(244, 245, 247);
             web.DefaultBackgroundColor = BackColor;
         }
+
+        // ---------- 窗口顶部 ----------
+        // 不用 Windows 画的标题栏（Windows 10 上是白的一条，跟页面不搭）：页面一直铺到窗口顶端，
+        // 由 TitleBarScript 在页面最上面画一条同色的，带最小化、最大化、关闭。左右下的边框还是系统的，能拖动改大小。
+        // 拖动：WebView2 支持 app-region: drag 时由它交给 Windows（贴边分屏、双击最大化都是系统的）；
+        // 不支持的旧运行时，页面在按下时发 tb:drag，这里当成在标题栏上按下
+
+        [DllImport("user32.dll")] static extern bool ReleaseCapture();
+        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wp, IntPtr lp);
+        [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hwnd);
+        [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr hwnd);
+        [DllImport("user32.dll")] static extern int GetSystemMetricsForDpi(int index, uint dpi);
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x0083 && m.WParam != IntPtr.Zero)  // WM_NCCALCSIZE：系统照常算出边框，只把标题栏那一截还给页面
+            {
+                int top = Marshal.PtrToStructure<RECT>(m.LParam).Top;
+                base.WndProc(ref m);
+                var r = Marshal.PtrToStructure<RECT>(m.LParam);
+                r.Top = top;
+                if (IsZoomed(Handle))
+                {
+                    // 最大化时窗口四周超出屏幕一圈（边框宽度）：顶上也让出这一圈，不然最上面一截看不见
+                    uint dpi = GetDpiForWindow(Handle);
+                    r.Top += GetSystemMetricsForDpi(33, dpi) + GetSystemMetricsForDpi(92, dpi);  // SM_CYFRAME + SM_CXPADDEDBORDER
+                }
+                Marshal.StructureToPtr(r, m.LParam, false);
+                m.Result = IntPtr.Zero;
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        /// <summary>按下鼠标交给 Windows，当成按在标题栏（2）或上边框（12）上</summary>
+        void SystemDrag(int hit)
+        {
+            ReleaseCapture();
+            SendMessage(Handle, 0x00A1, (IntPtr)hit, IntPtr.Zero);  // WM_NCLBUTTONDOWN
+        }
+
+        void PostMaximized()
+        {
+            if (ready) web.CoreWebView2.PostWebMessageAsString(WindowState == FormWindowState.Maximized ? "tb:max:1" : "tb:max:0");
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            PostMaximized();
+        }
+
+        // 每个页面（面板、助手状态页、出错页）加载时都画一遍顶栏：颜色取页面自己的，深色浅色自动一致
+        const string TitleBarScript = @"(() => {
+  if (window.top !== window) return;
+  const H = 32;
+  const post = (m) => { try { window.chrome.webview.postMessage(m); } catch (e) {} };
+  const css = `
+html.tb body { padding-top: ${H}px !important; box-sizing: border-box; }
+html.tb .app { min-height: calc(100vh - ${H}px) !important; }
+@media (min-width: 861px) { html.tb nav { top: ${H}px !important; height: calc(100vh - ${H}px) !important; } }
+#tb { position: fixed; top: 0; left: 0; right: 0; height: ${H}px; z-index: 2147483000; display: flex; justify-content: flex-end;
+  app-region: drag; -webkit-app-region: drag; user-select: none; -webkit-user-select: none; }
+#tb button { app-region: no-drag; -webkit-app-region: no-drag; width: 46px; height: ${H}px; border: 0; margin: 0; padding: 0;
+  background: transparent; color: inherit; font: 10px 'Segoe MDL2 Assets', 'Segoe Fluent Icons'; cursor: default; outline: none; }
+#tb button:hover { background: rgba(128, 128, 128, .2); }
+#tb button.x:hover { background: #c42b1c; color: #fff; }`;
+  let bar, maxBtn, maxed = false, queued = false;
+  const paint = () => {
+    queued = false;
+    if (!bar) return;
+    const body = getComputedStyle(document.body);
+    let bg = body.backgroundColor;
+    if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = getComputedStyle(document.documentElement).backgroundColor;
+    if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = 'Canvas';
+    let fill = bg;
+    const nav = document.querySelector('.app:not(.bare) > nav');
+    if (nav && nav.offsetHeight > innerHeight / 2) {
+      const n = getComputedStyle(nav), w = nav.offsetWidth;
+      fill = `linear-gradient(to right, ${n.backgroundColor} ${w - 1}px, ${n.borderRightColor} ${w - 1}px ${w}px, ${bg} ${w}px)`;
+    } else if (nav) fill = getComputedStyle(nav).backgroundColor;
+    bar.style.background = fill;
+    bar.style.color = body.color;
+  };
+  const later = () => { if (!queued) { queued = true; requestAnimationFrame(paint); } };
+  const init = () => {
+    if (document.getElementById('tb') || !document.body) return;
+    document.documentElement.classList.add('tb');
+    const st = document.createElement('style');
+    st.textContent = css;
+    (document.head || document.documentElement).append(st);
+    bar = document.createElement('div');
+    bar.id = 'tb';
+    for (const [glyph, title, msg, cls] of [['', '最小化', 'tb:min', ''], ['', '最大化', 'tb:max', 'm'], ['', '关闭', 'tb:close', 'x']]) {
+      const b = document.createElement('button');
+      b.textContent = glyph; b.title = title; b.className = cls; b.tabIndex = -1;
+      b.setAttribute('aria-label', title);
+      b.onclick = () => post(msg);
+      bar.append(b);
+      if (cls === 'm') maxBtn = b;
+    }
+    bar.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || e.target.closest('button')) return;
+      e.preventDefault();
+      if (e.detail === 2) post('tb:max');
+      else if (e.clientY <= 4 && !maxed) post('tb:top');
+      else post('tb:drag');
+    });
+    document.body.append(bar);
+    paint();
+    new MutationObserver(later).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    addEventListener('resize', later);
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', later);
+    post('tb:hello');
+  };
+  try {
+    window.chrome.webview.addEventListener('message', (e) => {
+      if (typeof e.data !== 'string' || !e.data.startsWith('tb:max:')) return;
+      maxed = e.data === 'tb:max:1';
+      if (maxBtn) { maxBtn.textContent = maxed ? '' : ''; maxBtn.title = maxed ? '还原' : '最大化'; maxBtn.setAttribute('aria-label', maxBtn.title); }
+    });
+  } catch (e) {}
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();";
 
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
             ApplyTheme();
+            SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0037);  // SWP_FRAMECHANGED|NOMOVE|NOSIZE|NOZORDER|NOACTIVATE：按上面的 WM_NCCALCSIZE 重算一次
         }
 
         void ThemeChanged(object sender, UserPreferenceChangedEventArgs e)
@@ -526,6 +605,23 @@ code{font:13px Consolas,monospace}</style>
             var core = web.CoreWebView2;
             core.Settings.AreDevToolsEnabled = false;
             core.Settings.IsStatusBarEnabled = false;
+            // 顶栏：页面里 app-region: drag 的地方当成标题栏（WebView2 运行时 123 起支持；不支持时页面发 tb:drag）
+            try { core.Settings.IsNonClientRegionSupportEnabled = true; } catch { }
+            await core.AddScriptToExecuteOnDocumentCreatedAsync(TitleBarScript);
+            core.WebMessageReceived += (s, e) =>
+            {
+                string msg;
+                try { msg = e.TryGetWebMessageAsString(); } catch { return; }
+                switch (msg)
+                {
+                    case "tb:min": WindowState = FormWindowState.Minimized; break;
+                    case "tb:max": WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized; break;
+                    case "tb:close": Close(); break;
+                    case "tb:drag": SystemDrag(2); break;   // HTCAPTION
+                    case "tb:top": if (WindowState == FormWindowState.Normal) SystemDrag(12); break;  // HTTOP：从上边缘拉大
+                    case "tb:hello": PostMaximized(); break;
+                }
+            };
             // 面板（9090）和助手状态页（9091）各自从 localStorage 取密钥：每次都填文件里的，等于自动登录。
             // 不能只在没存时填：重新安装后密钥换了，存着的旧密钥会让面板先要密钥
             var secret = Program.Secret();
