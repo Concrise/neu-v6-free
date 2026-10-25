@@ -7,20 +7,25 @@ macOS 上推荐装成**后台服务**：开机自动运行，带网页面板、�
 ## 安装（安装包，推荐）
 
 1. **退出其他代理软件**（ClashX、Clash Verge、FlClash、v2rayN、Surge……），包括它们的 TUN / 增强模式。端口 10808、9090、9091 不能被占用。
-2. 到 [Releases](https://github.com/Concrise/neu-v6-free/releases) 下载 `neu-v6-free-<版本>-macos.zip`，双击解压。
-3. 右键「安装.command」→「打开」→ 输入开机密码。第一次必须右键打开：脚本没有经过苹果公证，直接双击会被拦下。
-   也可以在终端里运行 `sudo ./install.sh`（在解压出来的文件夹里）。
+2. 到 [Releases](https://github.com/Concrise/neu-v6-free/releases) 下载 `neu-v6-free-<版本>-macos.pkg`，双击打开，按提示安装，输入电脑密码。
+   安装程序没有经过苹果公证，第一次打开会被拦下：到「系统设置 → 隐私与安全性」，在底部点「仍要打开」。
 
-安装脚本会：
+安装程序会：
 
-- 找 sing-box（1.12 以上）：PATH 里的（`brew install sing-box`）→ v2rayN 自带的 → 都没有就从 [sing-box 官方发布页](https://github.com/SagerNet/sing-box/releases) 下载；
-- 装到 `/usr/local/{libexec,etc,var}/neu-v6-free`，设成开机自启；
-- 生成随机的面板密钥（终端里会显示），自检能不能上网，不通自动撤回；
-- 通过后在浏览器里打开面板并自动登录。
+- 装好自带的 sing-box（1.13.21 官方版，Intel 和 Apple 芯片通用），装到 `/usr/local/{libexec,etc,var}/neu-v6-free`，设成开机自启；
+- 生成随机的面板密钥，自检能不能上网，不通自动撤回（会弹窗说明原因，完整记录在 `/var/log/neu-v6-free-install.log`）；
+- 通过后在浏览器里打开面板并自动登录；
+- 在「应用程序」里放一个「校园网 v6 免流」，以后点它打开面板（sing-box 暂停时打开状态页）。
+
+不想用安装程序也可以下载 `neu-v6-free-<版本>-macos.zip`，解压后右键「安装.command」→「打开」。它找 sing-box 的顺序是：
+PATH 里的（`brew install sing-box`）→ v2rayN 自带的 → 从官方发布页下载 1.13.21。
 
 装好时是第一部分（v6 优先省流）。在面板「📦 订阅与节点」里加订阅或节点，有自己的服务器就把服务器脚本的输出粘进去（见 [server.md](server.md)），点「应用」。
 
-**升级**：下载新版安装包，再运行一次「安装.command」。只升级程序和面板，订阅、设置、我的规则都保留。
+**升级**：有新版本时面板侧栏「设置」上会提示「有更新」，在「设置 → 版本与更新」点「更新」即可，不用密码；装完点一次页面上方的「应用」。
+本地助手每天自动查一次 GitHub 上的新版本，下载的安装包按发布里的 SHA256SUMS 校验，不对就不装。
+也可以下载新版安装包再运行一次「安装.command」（1.0.0 升上来要这样，那时还没有自动更新）。
+卸载脚本装在 `/usr/local/libexec/neu-v6-free/uninstall.sh`，不用留着安装包。
 
 ## 安装（命令行生成，高级）
 

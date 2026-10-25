@@ -1,0 +1,23 @@
+#!/bin/bash
+# .pkg 安装器把文件放好后以 root 运行：执行和 install.sh 相同的安装（装成后台服务、自检，不通自动撤回）。
+# 失败时安装器只会说「安装失败」，所以把原因用对话框告诉用户，完整记录在 /var/log/neu-v6-free-install.log。
+PKG=/usr/local/libexec/neu-v6-free/package
+LOG=/var/log/neu-v6-free-install.log
+CONSOLE_USER=$(stat -f%Su /dev/console)
+
+cd "$PKG" || exit 1
+SUDO_USER="$CONSOLE_USER" ./install.sh "$PKG/sing-box" "$PKG" > "$LOG" 2>&1
+code=$?
+chmod 644 "$LOG"
+if [ $code -eq 0 ]; then
+  rm -rf "$PKG"  # 已经装进系统，安装用的副本（含 sing-box）不用留着
+else
+  reason=$(grep -v '^[[:space:]]*$' "$LOG" | grep -v '^sing-box：' | tail -5 | sed 's/\\/\\\\/g; s/"/\\"/g')
+  if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != root ]; then
+    launchctl asuser "$(id -u "$CONSOLE_USER")" sudo -u "$CONSOLE_USER" osascript -e \
+      "display alert \"校园网 v6 免流：安装没有完成\" message \"$reason
+
+网络已经恢复原样。完整记录：$LOG\" as critical" >/dev/null 2>&1 &
+  fi
+fi
+exit $code

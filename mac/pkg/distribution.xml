@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- productbuild 用的安装器描述：标题、欢迎页、完成页。__VERSION__ 打包时（cli.js 的 package 选项）替换 -->
+<installer-gui-script minSpecVersion="2">
+  <title>校园网 v6 免流 __VERSION__</title>
+  <welcome file="welcome.html" mime-type="text/html"/>
+  <conclusion file="conclusion.html" mime-type="text/html"/>
+  <options customize="never" require-scripts="true" hostArchitectures="arm64,x86_64"/>
+  <domains enable_localSystem="true"/>
+  <choices-outline>
+    <line choice="default"/>
+  </choices-outline>
+  <choice id="default" title="校园网 v6 免流">
+    <pkg-ref id="io.github.concrise.neu-v6-free"/>
+  </choice>
+  <pkg-ref id="io.github.concrise.neu-v6-free" version="__VERSION__" onConclusion="none">neu-v6-free-core.pkg</pkg-ref>
+</installer-gui-script>

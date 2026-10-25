@@ -19,10 +19,11 @@ if [ -z "$SRC_BIN" ]; then
   done
   if [ -z "$SRC_BIN" ]; then
     ARCH=$(uname -m); [ "$ARCH" = x86_64 ] && ARCH=amd64
-    TAG=$(curl -fsSL -m 30 https://api.github.com/repos/SagerNet/sing-box/releases/latest | /usr/bin/python3 -c "import json,sys;print(json.load(sys.stdin)['tag_name'])") \
-      || { echo "找不到 sing-box，也没能从 GitHub 下载：先 brew install sing-box，或把可执行文件路径作为第一个参数"; exit 1; }
+    # 固定用测试过的版本（和 cli.js 的 SINGBOX_VERSION 一致）：新的大版本常常改配置格式
+    SB_VER=${SINGBOX_VERSION:-1.13.21}
     DL=$(mktemp -d /tmp/neu-v6-singbox.XXXXXX)
-    curl -fsSL -m 300 -o "$DL/sb.tgz" "https://github.com/SagerNet/sing-box/releases/download/$TAG/sing-box-${TAG#v}-darwin-$ARCH.tar.gz"
+    curl -fsSL -m 300 -o "$DL/sb.tgz" "https://github.com/SagerNet/sing-box/releases/download/v$SB_VER/sing-box-$SB_VER-darwin-$ARCH.tar.gz" \
+      || { echo "找不到 sing-box，也没能从 GitHub 下载：先 brew install sing-box，或把可执行文件路径作为第一个参数"; exit 1; }
     tar -xzf "$DL/sb.tgz" -C "$DL"
     SRC_BIN=$(find "$DL" -name sing-box -type f | head -1)
     trap 'rm -rf "$DL"' EXIT
@@ -53,6 +54,11 @@ install -d -o root -g wheel -m 755 "$BIN_DIR" "$ETC_DIR" "$ETC_DIR/rules" "$ETC_
 install -d -o root -g wheel -m 700 "$VAR_DIR"
 rm -f "$VAR_DIR/safe-mode.json" # 重新安装 = 重新启用（清掉之前的安全模式）
 install -o root -g wheel -m 755 "$SRC_BIN" "$BIN_DIR/sing-box"
+# 版本号（本地助手检查更新用）；卸载脚本放进程序目录，不用留着安装包也能卸载
+[ -f "$SRC/VERSION" ] && install -o root -g wheel -m 644 "$SRC/VERSION" "$ETC_DIR/VERSION"
+for f in uninstall.sh helper-service.sh; do
+  [ -f "$HERE/$f" ] && install -o root -g wheel -m 755 "$HERE/$f" "$BIN_DIR/$f"
+done
 # 起步配置（发布包）：已经装过就保留现有配置；第一次装就生成随机的面板密钥
 STARTER=; grep -q '__NEU_SECRET__' "$SRC/config.json" && STARTER=1
 if [ -n "$STARTER" ] && [ -f "$ETC_DIR/config.json" ]; then
@@ -147,6 +153,8 @@ echo "已安装。面板 http://127.0.0.1:9090/ui"
 if [ -n "$STARTER" ] && [ -n "${SECRET:-}" ]; then
   # 第一次装：密钥放在网址的 # 后面（不会发给任何服务器），面板读到后自动登录
   echo "面板密钥：$SECRET（已经帮你在浏览器里登录；换浏览器时要用）"
-  [ -n "${SUDO_USER:-}" ] && sudo -u "$SUDO_USER" open "http://127.0.0.1:9090/ui/#secret=$SECRET" 2>/dev/null || true
+  # 在登录用户的桌面会话里打开（安装器 .pkg 里是 root 运行的，直接 open 打不开浏览器）
+  [ -n "${SUDO_USER:-}" ] && launchctl asuser "$(id -u "$SUDO_USER")" sudo -u "$SUDO_USER" open "http://127.0.0.1:9090/ui/#secret=$SECRET" 2>/dev/null || true
 fi
-echo "以后订阅、节点、设置都在面板里改（「订阅与节点」「设置」），不用再运行脚本；卸载：sudo $(dirname "$0")/uninstall.sh"
+echo "以后订阅、节点、设置都在面板里改（「订阅与节点」「设置」），新版本在面板「设置」里一键更新，不用再运行脚本。"
+echo "卸载：sudo $BIN_DIR/uninstall.sh"

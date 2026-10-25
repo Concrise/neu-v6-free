@@ -247,6 +247,7 @@ function renderNav() {
     if (key === "groups") n = meta.groups.length;
     if (key === "subs" && prof()) n = prof().subscriptions.length + prof().nodes.length;
     if (key === "settings" && prof()?.pending) n = "未应用";
+    if (key === "settings" && helper.update?.available) n = "有更新";
     const on = page === key || (key === "groups" && page === "group");
     nav.append($(`<a href="#/${key}" class="${on ? "on" : ""}">${icon} ${label}<span class="n">${n}</span></a>`));
   }
@@ -275,6 +276,10 @@ function renderHome() {
     ? "校园网 IPv6 免费、IPv4 计费。有 IPv6 的国内网站直接走 v6；没有 IPv6 的，经你自己的服务器转一下（v6 进、v4 出），也免费。"
     : "校园网 IPv6 免费、IPv4 计费。这份配置让能走 v6 的流量都走 v6；只有 IPv4 的国内网站照常 v4 直连（计费）。"}</p></div>`));
 
+  if (helper.update?.available) {
+    m.append($(`<div class="note"><b>有新版本 ${esc(helper.update.latest)}</b>：到 <a href="#/settings">⚙️ 设置 → 版本与更新</a> 一键更新，
+      不用管理员密码，订阅、设置和我的规则都保留。</div>`));
+  }
   const p = prof();
   if (p && !p.subscriptions.length && !p.nodes.length && !Object.keys(p.settings.entry_servers || {}).length) {
     m.append($(`<div class="card" style="margin-bottom:16px;border-color:var(--accent)"><b>👋 开始使用</b>
@@ -1067,7 +1072,7 @@ function renderSubs() {
 function renderSettings() {
   const m = main();
   m.append($(`<div><h1>设置</h1><p class="lead">改完点上方的「应用」生效。面板密钥、安装位置这些和安装绑定的设置不在这里改。</p></div>`));
-  if (!needClient(m)) return;
+  if (!needClient(m)) { if (helper.client) renderUpdate(m); return; }
   const p = prof(), s = p.settings;
   const servers = s.entry_servers || {};
   const ids = Object.keys(servers);
@@ -1148,6 +1153,57 @@ function renderSettings() {
     changed("已保存");
   };
   m.append(adv);
+  renderUpdate(m);
+}
+
+/** 设置页底部：版本与更新。本地助手查 GitHub 上的最新发布，点「更新」由它下载、校验、安装（不要管理员） */
+function renderUpdate(m) {
+  m.append($(`<h2>版本与更新</h2>`));
+  const card = $(`<div class="card"><div class="row"><span class="grow">当前版本 <b class="cur">${esc(helper.version || "—")}</b></span>
+    <button class="btn small chk">检查更新</button></div><div class="small body" style="margin-top:8px">读取中……</div></div>`);
+  const body = card.querySelector(".body");
+  const show = (v) => {
+    card.querySelector(".cur").textContent = v.current === "0" ? "1.0.0 或更早" : v.current;
+    body.innerHTML = "";
+    if (v.error) body.append($(`<div style="color:var(--bad)">${esc(v.error)}</div>`));
+    else if (!v.latest) body.append($(`<span class="muted">还没检查过。</span>`));
+    else if (!v.available) body.append($(`<span class="muted">已经是最新版本（${when(v.checked)} 检查过；本地助手每天自动查一次）。</span>`));
+    if (!v.available) return;
+    const box = $(`<div><b>有新版本 ${esc(v.latest)}</b> · <a href="${esc(v.url)}" target="_blank" rel="noopener">在 GitHub 上看</a>
+      <pre class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto;margin:8px 0;background:var(--bg);padding:10px;border-radius:8px">${esc(v.notes || "（没有说明）")}</pre>
+      <p class="muted" style="margin:0 0 8px">换上新的面板、生成器、规则集和本地助手，不需要管理员密码；配置、订阅与设置、我的规则都保留。
+      安装包先按发布里的 SHA256 校验，不对就不装。装完点一次页面上方的「应用」，新生成器才会用上。</p>
+      <button class="btn primary">更新到 ${esc(v.latest)}</button></div>`);
+    const b = box.querySelector("button");
+    b.onclick = async () => {
+      b.disabled = true;
+      b.textContent = "下载并安装中……";
+      try {
+        const r = await helperApi("/update/install", { method: "POST" });
+        b.textContent = "已安装，等本地助手重启……";
+        for (let i = 0; i < 40; i++) {
+          await new Promise((ok) => setTimeout(ok, 1000));
+          try { if ((await helperApi("/health")).version === r.to) break; } catch { /* 正在重启 */ }
+        }
+        if (prof()) { prof().pending = true; await saveProfile().catch(() => { }); }
+        location.reload();
+      } catch (e) {
+        b.disabled = false;
+        b.textContent = `更新到 ${v.latest}`;
+        box.append($(`<div style="color:var(--bad);margin-top:6px">更新失败：${esc(e.message)}（原来的版本没动）</div>`));
+      }
+    };
+    body.append(box);
+  };
+  card.querySelector(".chk").onclick = async (e) => {
+    e.target.disabled = true;
+    body.textContent = "检查中……";
+    try { show(await helperApi("/update/check", { method: "POST" })); } catch (err) { body.textContent = "检查失败：" + err.message; }
+    e.target.disabled = false;
+  };
+  if (!helper.client) body.textContent = "本地助手是旧版，不支持自动更新。" + helperHelp();
+  else helperApi("/update").then(show).catch((e) => { body.textContent = "读取失败：" + e.message; });
+  m.append(card);
 }
 
 function renderLogs() {
@@ -1222,6 +1278,10 @@ async function start() {
   } catch (e) { if (e.message !== "401") renderLogin("连接失败：" + e.message); return; }
   await checkHelper();
   await Promise.all([loadRules(), loadClient()]);
+  if (helper.client && helper.update && !helper.update.latest) {
+    // 助手刚启动、还没查过新版本：现在查一次，有新版本就在侧栏和概览上提示
+    helperApi("/update").then((v) => { helper.update = { latest: v.latest, available: v.available }; if (v.available) render(); }).catch(() => { });
+  }
   document.getElementById("root").innerHTML = `<div class="app"><nav></nav><main><div class="wrap"></div></main></div>`;
   window.onhashchange = render;
   render();

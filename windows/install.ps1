@@ -4,7 +4,7 @@
 # 以后改了订阅或设置：重新生成后运行 update.ps1，不需要管理员。
 # 用法：在这个文件上右键 →「使用 PowerShell 运行」；或在 PowerShell 里：
 #   powershell -ExecutionPolicy Bypass -File install.ps1 [-SingBox D:\path\sing-box.exe]
-# 不指定 -SingBox 时依次找：旁边的 sing-box.exe → 已安装的 → 从 GitHub 下载官方最新版。重新安装不会覆盖「我的规则」。
+# 不指定 -SingBox 时依次找：旁边的 sing-box.exe（ARM64 电脑先找 sing-box-arm64.exe）→ 已安装的 → 从 GitHub 下载测试过的版本。重新安装不会覆盖「我的规则」。
 # 发布包（GitHub Releases 的 zip）里的配置是「起步配置」：面板密钥是占位符，第一次安装时随机生成；
 # 已经装过时只升级程序和面板，保留现有配置和面板里的订阅、设置。
 param([string]$SingBox = '', [switch]$NoPause)
@@ -147,26 +147,27 @@ try {
     }
   }
 
-  # sing-box.exe
+  # sing-box.exe：安装程序（setup.exe）里自带 x64 和 ARM64 两个版本，按本机选
   $sbDest = Join-Path $dir 'sing-box.exe'
-  if (-not $SingBox -and (Test-Path (Join-Path $src 'sing-box.exe'))) { $SingBox = Join-Path $src 'sing-box.exe' }
-  if ($SingBox) { Copy-Item $SingBox $sbDest -Force; Write-Host "sing-box：用 $SingBox" }
+  $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { 'arm64' } else { 'amd64' }
+  $bundled = if ($arch -eq 'arm64' -and (Test-Path (Join-Path $src 'sing-box-arm64.exe'))) { Join-Path $src 'sing-box-arm64.exe' } else { Join-Path $src 'sing-box.exe' }
+  if (-not $SingBox -and (Test-Path $bundled)) { $SingBox = $bundled }
+  if ($SingBox) { Copy-Item $SingBox $sbDest -Force; Write-Host "sing-box：用 $(Split-Path $SingBox -Leaf)" }
   elseif (Test-Path $sbDest) { Write-Host 'sing-box：沿用已安装的' }
   else {
-    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
-    Write-Host '正在从 GitHub 下载 sing-box 官方版……'
+    # 固定用测试过的版本（和 cli.js 的 SINGBOX_VERSION 一致）：新的大版本常常改配置格式
+    $sbVer = '1.13.21'
+    Write-Host "正在从 GitHub 下载 sing-box $sbVer……"
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/SagerNet/sing-box/releases/latest' -UseBasicParsing
-    $asset = @($rel.assets | Where-Object { $_.name -like "sing-box-*-windows-$arch.zip" })[0]
-    if (-not $asset) { throw "没找到 windows-$arch 的 sing-box，请手动下载后用 -SingBox 指定" }
     $tmp = Join-Path $env:TEMP "neu-v6-sing-box-$([guid]::NewGuid())"
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
-      Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "$tmp\sb.zip" -UseBasicParsing
+      Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v$sbVer/sing-box-$sbVer-windows-$arch.zip" -OutFile "$tmp\sb.zip" -UseBasicParsing
       Expand-Archive "$tmp\sb.zip" $tmp
       Copy-Item (Get-ChildItem $tmp -Recurse -Filter 'sing-box.exe' | Select-Object -First 1).FullName $sbDest -Force
-    } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
-    Write-Host "sing-box：已下载 $($rel.tag_name)"
+    } catch { throw "下载 sing-box 失败（$($_.Exception.Message)）：请用安装程序 setup.exe 安装（自带 sing-box），或手动下载后用 -SingBox 指定" }
+    finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+    Write-Host "sing-box：已下载 $sbVer"
   }
 
   # 配置、面板、规则集、助手与脚本
@@ -187,7 +188,8 @@ try {
       $t = [IO.File]::ReadAllText($pfDest, $utf8)
       if ($t -notmatch '"pending"\s*:\s*true') { [IO.File]::WriteAllText($pfDest, ($t -replace '^\s*\{', '{"pending":true,'), $utf8) }
     }
-    foreach ($f in 'helper.ps1', 'update.ps1', 'uninstall.ps1', 'uninstall.bat') { if (Test-Path (Join-Path $src $f)) { Copy-Item (Join-Path $src $f) $dir -Force } }
+    # VERSION：本地助手检查更新用
+    foreach ($f in 'helper.ps1', 'update.ps1', 'uninstall.ps1', 'uninstall.bat', 'VERSION') { if (Test-Path (Join-Path $src $f)) { Copy-Item (Join-Path $src $f) $dir -Force } }
     if (Test-Path (Join-Path $src 'rules')) {
       if (Test-Path (Join-Path $src 'rules\*.srs')) { Copy-Item (Join-Path $src 'rules\*.srs') $rulesDir -Force }
       foreach ($f in Get-ChildItem (Join-Path $src 'rules') -Filter 'user-*.json') {  # 「我的规则」只补缺的

@@ -8,25 +8,30 @@ Windows 10 / 11（x64 或 ARM64）上装成**后台服务**：开机自动运行
 1. **退出其他代理软件**（v2rayN、Clash Verge、FlClash……）：托盘图标右键 → 退出，不是只关窗口。端口 10808、9090、9091 不能被占用。
    - 如果你给命令行工具（比如 Claude Code）设过 `HTTPS_PROXY=http://127.0.0.1:7890` 之类，代理软件一退出它们就连不上。
      装好后在面板「⚙️ 设置」里把代理端口改成 7890，让 sing-box 接替同一个端口，原来的设置照样能用。
-2. 到 [Releases](https://github.com/Concrise/neu-v6-free/releases) 下载 `neu-v6-free-<版本>-windows.zip`，解压。
+2. 到 [Releases](https://github.com/Concrise/neu-v6-free/releases) 下载 `neu-v6-free-<版本>-windows-setup.exe`。
 
 ## 安装
 
-双击解压出来的 `install.bat`，弹出的管理员确认点「是」（只有这一次）。
+双击 `setup.exe`，弹出的管理员确认点「是」（只有这一次）。没有数字签名，弹出「Windows 已保护你的电脑」时点「更多信息 → 仍要运行」。
 
 它会：
 
 1. 把面板、规则集和起步配置装到 `C:\neu-v6-free`，生成随机的面板密钥。
-2. 准备 sing-box：旁边有 `sing-box.exe` 就用它，否则从 GitHub 下载官方最新版。也可以指定：
-   `powershell -ExecutionPolicy Bypass -File install.ps1 -SingBox D:\path\sing-box.exe`
+2. 装好自带的 sing-box（1.13.21 官方版，x64 和 ARM64 电脑各用对应的版本）。
 3. 注册计划任务「neu-v6-free helper」：开机以 SYSTEM 身份运行本地助手，由它启动 sing-box、崩溃自动拉起。
 4. 关掉失效的系统代理（别的代理软件退出后留下的），提示指向代理软件的环境变量。
 5. **自检**：测一次能不能上网。不通就自动撤回（停掉 sing-box、取消开机启动），电脑恢复原样，并显示原因。
-6. 通过后在浏览器里打开面板并自动登录（面板密钥也会显示在窗口里，换浏览器时要用）。
+6. 通过后在浏览器里打开面板并自动登录；开始菜单里放一个「校园网 v6 免流」打开面板，「设置 → 应用」里登记卸载。
+   安装过程的输出都显示在安装窗口里，不通时会说明原因。
+
+不想用安装程序也可以下载 `neu-v6-free-<版本>-windows.zip`，解压后双击 `install.bat`（没有自带 sing-box，会从 GitHub 下载 1.13.21；
+也可以 `powershell -ExecutionPolicy Bypass -File install.ps1 -SingBox D:\path\sing-box.exe` 指定）。
 
 装好时是第一部分（v6 优先省流）。在面板「📦 订阅与节点」里加订阅或节点，有自己的服务器就把服务器脚本的输出粘进去（见 [server.md](server.md)），点「应用」。
 
-**升级**：下载新版安装包，再双击一次 `install.bat`。只升级程序和面板，订阅、设置、我的规则都保留。
+**升级**：有新版本时面板侧栏「设置」上会提示「有更新」，在「设置 → 版本与更新」点「更新」即可，不需要管理员；装完点一次页面上方的「应用」。
+本地助手每天自动查一次 GitHub 上的新版本，下载的安装包按发布里的 SHA256SUMS 校验，不对就不装。
+也可以下载新版安装包再双击一次 `install.bat`（1.0.0 升上来要这样，那时还没有自动更新）。
 
 ### 命令行生成（高级）
 

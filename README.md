@@ -43,6 +43,7 @@
 - **流量统计**（macOS、Windows）：本月 v6 直连省了多少、经服务器免流省了多少、v4 计费用了多少。
 - **日志**：sing-box 的警告和错误实时显示，节点连不上、规则集出错一眼看到。
 - **只有第一次安装要管理员权限**：之后更新配置交给后台的本地助手，不用再输密码。
+- **自动检查更新**：本地助手每天查一次 GitHub 上的新版本，面板里一键更新（下载后按 SHA256 校验，不用管理员密码，订阅、设置、我的规则都保留）。
 - **断网保护**：装完、更新后、运行中都会检查，经 sing-box 上不了网就自动撤回或暂停，电脑回到普通网络。见下方[断网保护](#断网保护)。
 - **启动不依赖网络**：电脑上规则集随配置一起装，服务器不通时也能正常上网。
 
@@ -64,13 +65,15 @@
 
 ### 1. 下载安装
 
-到 [Releases](https://github.com/Concrise/neu-v6-free/releases) 下载对应系统的安装包并解压。安装前先退出其他代理软件（Clash、v2rayN、FlClash 等，托盘右键退出）。
+到 [Releases](https://github.com/Concrise/neu-v6-free/releases) 下载安装程序。安装前先退出其他代理软件（Clash、v2rayN、FlClash 等，托盘右键退出）。
 
-- **macOS**：右键「安装.command」→「打开」（第一次要这样绕过「来自身份不明的开发者」的提示），输入开机密码。
-  没装 sing-box 时会自动从官方下载。详见 [docs/macos.md](docs/macos.md)。
-- **Windows 10 / 11**：双击 `install.bat`，管理员确认点「是」。装到 `C:\neu-v6-free`。详见 [docs/windows.md](docs/windows.md)。
+- **macOS**：`neu-v6-free-<版本>-macos.pkg`，双击安装，输入电脑密码。安装程序没有经过苹果公证，被拦下时到
+  「系统设置 → 隐私与安全性」底部点「仍要打开」。装好后「应用程序」里有「校园网 v6 免流」，点它打开面板。详见 [docs/macos.md](docs/macos.md)。
+- **Windows 10 / 11**：`neu-v6-free-<版本>-windows-setup.exe`，双击安装，管理员确认点「是」。没有数字签名，弹出「Windows 已保护你的电脑」时
+  点「更多信息 → 仍要运行」。装到 `C:\neu-v6-free`，开始菜单里有「校园网 v6 免流」，卸载在「设置 → 应用」。详见 [docs/windows.md](docs/windows.md)。
 
-只有这一次要管理员权限。装完会自检，不通自动撤回；通过后浏览器自动打开面板并登录（面板密钥是安装时随机生成的，终端里也会显示）。
+安装程序自带 sing-box 内核，不用另外下载。只有这一次要管理员权限。装完会自检，不通自动撤回；
+通过后浏览器自动打开面板并登录（面板密钥是安装时随机生成的）。
 
 装好时是**第一部分**：有 IPv6 的国内网站已经在走 v6 免费了。
 
@@ -95,7 +98,7 @@
 | 加订阅、更新订阅、加节点、改服务器 | 面板「订阅与节点」「设置」，改完点「应用」 | 不需要 |
 | 离开校园网（没有 IPv6） | 连不上服务器时自动改走「不用服务器」，能连上自动切回；也可以手动选 | 不需要 |
 | 上不了网 / 想临时关掉 | 会自动暂停；也可以面板「概览」→「暂停」，或打开 `http://127.0.0.1:9091/` | 不需要 |
-| 升级到新版本 | 下载新的安装包再装一次：只升级程序和面板，订阅、设置、我的规则都保留 | 要（同第一次） |
+| 升级到新版本 | 有新版本时面板侧栏「设置」上会提示，在「设置 → 版本与更新」点「更新」；装完点一次「应用」 | 不需要 |
 
 调整规则的完整说明见 [docs/rules.md](docs/rules.md)。
 
@@ -113,7 +116,9 @@ sudo mac/install.sh                  # Windows：双击 out\windows\install.bat
 
 以后改了 `config.yaml`：重新生成，macOS 运行 `mac/update.sh`、Windows 双击新生成目录里的 `update.bat`（都不用管理员）。
 命令行生成的设置会同步到面板里；之后再用命令行更新，会用文件里的设置覆盖面板里改的。
-发布安装包：`node cli.js --package -o dist`。
+发布新版本：改 `package.json` 的版本号，运行 `node cli.js --package -o dist`（需要 `brew install makensis` 来编译 Windows 安装程序），
+得到 macOS 的 `.pkg`、Windows 的 `-setup.exe`（都自带 sing-box）、两个 `.zip`（自动更新用）和 `SHA256SUMS`，
+再 `gh release create v<版本> dist/*.pkg dist/*.exe dist/*.zip dist/SHA256SUMS`。已经装好的客户端会在一天内发现并提示更新。
 
 还有一个不用装任何东西的[网页生成器](web/)（本地打开要先在仓库目录运行 `python3 -m http.server 8765`，再访问 `http://127.0.0.1:8765/web/`），
 在浏览器里生成各平台的配置，不上传任何内容。
@@ -156,8 +161,9 @@ cli.js              命令行生成器
 lib/                生成逻辑（命令行、网页生成器、面板共用）：groups.js 是分组与规则定义，build.js 生成 sing-box 配置，
                     subscription.js 解析订阅与节点链接，convert.js 把节点转成 sing-box 出站
 panel/              网页面板（单个 HTML 文件；安装时 lib/ 一起装进 panel/lib/，面板在浏览器里生成配置）
-mac/                macOS 安装 / 更新 / 卸载脚本，本地助手 helper.py
-windows/            Windows 安装 / 更新 / 卸载脚本，本地助手 helper.ps1
+mac/                macOS 安装 / 更新 / 卸载脚本，本地助手 helper.py；pkg/ 是 .pkg 安装程序的资源
+windows/            Windows 安装 / 更新 / 卸载脚本，本地助手 helper.ps1；installer.nsi 是 setup.exe 的 NSIS 脚本
+licenses/           随安装程序附带的第三方许可证（sing-box 的 GPLv3 全文）
 server/setup.sh     第二部分的服务器一键部署脚本
 web/                网页生成器
 docs/               文档

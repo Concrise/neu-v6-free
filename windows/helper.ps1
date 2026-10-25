@@ -12,7 +12,8 @@
 #   5. 物理网卡的 WeakHostSend：sing-box 运行期间关掉（见 FixWeakHost），停止时恢复。
 #   6. 流量统计（/traffic）：和 mac/helper.py 相同的记账方式，存在 traffic.json（见「流量统计」一节）。
 #   7. 客户端（/profile、/fetch、/apply）：订阅、节点、设置在面板里管，设置存在 profile.json；面板生成的配置交给 /apply 安装。
-# 只监听 127.0.0.1；/rules、/profile、/fetch、/apply 都要带和 Clash API 相同的密钥，网页发来的请求只认面板页面。
+#   8. 自动更新（/update、/update/check、/update/install）：每天查一次 GitHub 上的新版本，面板里点「更新」后下载、校验、换上新程序。
+# 只监听 127.0.0.1；/rules、/profile、/fetch、/apply、/update 都要带和 Clash API 相同的密钥，网页发来的请求只认面板页面。
 # 手动运行（调试用，管理员 PowerShell）：powershell -ExecutionPolicy Bypass -File helper.ps1 [-Dir C:\neu-v6-free] [-Port 9091]
 param(
   [string]$Dir = $PSScriptRoot,
@@ -753,6 +754,7 @@ function ApplyUpdate($src) {
     New-Item -ItemType Directory -Force -Path (Join-Path $panel 'lib') | Out-Null
     foreach ($f in Get-ChildItem $lib -File) { Copy-Item $f.FullName (Join-Path (Join-Path $panel 'lib') $f.Name) -Force }
   }
+  if (Test-Path (Join-Path $src 'VERSION')) { Copy-Item (Join-Path $src 'VERSION') $VersionFile -Force }
   $pf = Join-Path $src 'profile.json'  # update.ps1：命令行的设置覆盖面板里的
   if (Test-Path $pf) {
     $new = -not (Test-Path $ProfileFile)
@@ -897,6 +899,90 @@ function ApplyInline($body) {
   } finally { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
+
+# ---------- 自动更新：从 GitHub Releases 升级程序本身（与 mac/helper.py 相同）----------
+# 只从本仓库的正式发布下载 Windows 安装包，按同一发布里的 SHA256SUMS 校验；装的是面板、生成器、规则集、本地助手和脚本，
+# 配置、订阅与设置、我的规则都不动（新生成器要在面板里点一次「应用」才用上）。每天自动查一次，装要用户在面板里点
+$UpdateRepo = 'Concrise/neu-v6-free'
+$UpdateApi = if ($env:NEU_UPDATE_API) { $env:NEU_UPDATE_API } else { "https://api.github.com/repos/$UpdateRepo/releases/latest" }  # 环境变量只给测试用
+$UpdatePrefix = if ($env:NEU_UPDATE_API) { '' } else { "https://github.com/$UpdateRepo/releases/download/" }
+$VersionFile = Join-Path $Dir 'VERSION'
+$script:upd = @{ latest = $null; notes = ''; url = $null; asset = $null; sums = $null; checked = $null; error = $null }
+$script:nextUpdateCheck = (Get-Date).AddSeconds(90)
+
+function CurrentVersion() {
+  try { $v = ([IO.File]::ReadAllText($VersionFile)).Trim(); if ($v) { return $v } } catch { }
+  return '0'  # 1.0.0 及更早的安装没有版本文件
+}
+function VNewer([string]$a, [string]$b) {
+  $x = @([regex]::Matches($a, '\d+') | Select-Object -First 3 | ForEach-Object { [int]$_.Value }) + @(0, 0, 0)
+  $y = @([regex]::Matches($b, '\d+') | Select-Object -First 3 | ForEach-Object { [int]$_.Value }) + @(0, 0, 0)
+  for ($i = 0; $i -lt 3; $i++) { if ($x[$i] -ne $y[$i]) { return $x[$i] -gt $y[$i] } }
+  return $false
+}
+function UpdateView() {
+  $cur = CurrentVersion; $u = $script:upd
+  $newer = [bool]$u.latest -and (VNewer $u.latest $cur)
+  $err = if ($u.error) { $u.error } elseif ($newer -and -not $u.asset) { '新版本还没有 Windows 安装包' } else { $null }
+  [ordered]@{ current = $cur; latest = $u.latest; available = ($newer -and [bool]$u.asset); notes = $u.notes; url = $u.url; checked = $u.checked; error = $err }
+}
+function CheckUpdate() {
+  try {
+    $rel = ParseJson ($utf8.GetString((Download $UpdateApi).bytes))
+    $assets = @{}
+    foreach ($a in @($rel['assets'])) { if ($a) { $assets[[string]$a['name']] = [string]$a['browser_download_url'] } }
+    $win = @($assets.Keys | Where-Object { $_ -like '*-windows.zip' })[0]
+    $script:upd.latest = ([string]$rel['tag_name']).TrimStart('v')
+    $script:upd.notes = [string]$rel['body']; $script:upd.url = [string]$rel['html_url']
+    $script:upd.asset = if ($win) { @{ name = $win; url = $assets[$win] } } else { $null }
+    $script:upd.sums = $assets['SHA256SUMS']; $script:upd.error = $null
+  } catch { $script:upd.error = "检查更新失败：$($_.Exception.Message)" }
+  $script:upd.checked = (Get-Date).ToString('s')
+  $script:nextUpdateCheck = (Get-Date).AddHours(24)
+  UpdateView
+}
+function InstallUpdate() {
+  $v = CheckUpdate
+  if (-not $v.available) { if ($v.error) { Bad $v.error } else { Bad '已经是最新版本' } }
+  $a = $script:upd.asset; $sumsUrl = [string]$script:upd.sums
+  if (-not $sumsUrl) { Bad '发布里没有 SHA256SUMS，没法校验，不安装' }
+  foreach ($u in @($a.url, $sumsUrl)) { if (-not $u.StartsWith($UpdatePrefix)) { Bad "下载地址不是本项目的发布：$u" } }
+  $zip = (Download $a.url).bytes
+  $sums = $utf8.GetString((Download $sumsUrl).bytes)
+  $want = @($sums -split "`n" | Where-Object { $_.Trim().EndsWith($a.name) } | ForEach-Object { ($_.Trim() -split '\s+')[0] })[0]
+  $got = -join ([Security.Cryptography.SHA256]::Create().ComputeHash($zip) | ForEach-Object { $_.ToString('x2') })
+  if (-not $want -or $got -ne $want.ToLower()) { Bad '安装包校验不通过（SHA256 不符），没有安装' }
+  $old = CurrentVersion
+  $stage = Join-Path $Dir ('.update-' + [guid]::NewGuid().ToString('N'))
+  try {
+    New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    $zf = Join-Path $stage 'pkg.zip'
+    [IO.File]::WriteAllBytes($zf, $zip)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $x = Join-Path $stage 'x'
+    [IO.Compression.ZipFile]::ExtractToDirectory($zf, $x)  # 有 ..\ 之类越出目录的路径会直接报错
+    $pkg = @(Get-ChildItem $x -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'VERSION') })[0]
+    if (-not $pkg -or -not (Test-Path (Join-Path $pkg.FullName 'helper.ps1'))) { Bad '安装包的结构不对' }
+    $p = $pkg.FullName
+    $panel = Join-Path $Dir 'panel'
+    Copy-Item (Join-Path (Join-Path $p 'panel') 'index.html') (Join-Path $panel 'index.html') -Force
+    $lib = Join-Path $panel 'lib'
+    New-Item -ItemType Directory -Force -Path $lib | Out-Null
+    foreach ($f in Get-ChildItem (Join-Path (Join-Path $p 'panel') 'lib') -File) { Copy-Item $f.FullName (Join-Path $lib $f.Name) -Force }
+    foreach ($f in Get-ChildItem (Join-Path $p 'rules') -Filter '*.srs' -ErrorAction SilentlyContinue) { Copy-Item $f.FullName (Join-Path $script:RulesDir $f.Name) -Force }
+    foreach ($n in 'update.ps1', 'uninstall.ps1', 'uninstall.bat', 'VERSION') {
+      if (Test-Path (Join-Path $p $n)) { Copy-Item (Join-Path $p $n) (Join-Path $Dir $n) -Force }
+    }
+    $newHelper = Join-Path $p 'helper.ps1'
+    $restart = (Get-FileHash $newHelper).Hash -ne (Get-FileHash $PSCommandPath).Hash
+    if ($restart) { Copy-Item $newHelper $PSCommandPath -Force }
+  } finally { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
+  Log "已从 $old 更新到 $(CurrentVersion)"
+  # 安装程序在「设置 → 应用」里登记的版本号也跟着改
+  if ($IsWin) { Set-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\neu-v6-free' -Name DisplayVersion -Value (CurrentVersion) -ErrorAction SilentlyContinue }
+  [ordered]@{ ok = $true; from = $old; to = (CurrentVersion); helper_restart = $restart }
+}
+
 # sing-box 停掉时面板（由 sing-box 提供）打不开，助手自己给一个最简单的状态页
 $StatusPage = @'
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -953,7 +1039,7 @@ function Handle($ctx) {
   if ($method -eq 'OPTIONS') { $res.StatusCode = 204; $res.Close(); return }
   if ($path -eq '/health') {
     $running = [bool]($script:proc -and -not $script:proc.HasExited)
-    return Reply $ctx 200 ([ordered]@{ ok = $true; rules = [bool]$script:Targets.Count; traffic = [bool]$script:TrafficPs; apply = $true; client = $true; singbox = $running; tun = ($running -and (TunUp)); safe_mode = $script:safe; server_fallback = (LoadFallback); server_checked = $script:guard.checked })
+    return Reply $ctx 200 ([ordered]@{ ok = $true; rules = [bool]$script:Targets.Count; traffic = [bool]$script:TrafficPs; apply = $true; client = $true; singbox = $running; tun = ($running -and (TunUp)); safe_mode = $script:safe; server_fallback = (LoadFallback); server_checked = $script:guard.checked; version = (CurrentVersion); update = [ordered]@{ latest = $script:upd.latest; available = (UpdateView).available } })
   }
   if ($path -eq '/' -and $method -eq 'GET') {
     $bytes = $utf8.GetBytes($StatusPage)
@@ -974,7 +1060,7 @@ function Handle($ctx) {
       return Reply $ctx 200 (Resume)
     } catch [System.ArgumentException] { return Reply $ctx 400 ([ordered]@{ error = $_.Exception.Message }) }
   }
-  if ($path -eq '/profile' -or $path -eq '/fetch' -or ($path -eq '/apply' -and $origin)) {
+  if ($path -eq '/profile' -or $path -eq '/fetch' -or $path.StartsWith('/update') -or ($path -eq '/apply' -and $origin)) {
     # 客户端功能（设置、订阅、安装面板生成的配置）：和 /rules 一样只认面板页面 + 密钥
     if (-not $script:Secret -or ($origin -and $script:Origins -notcontains $origin) -or $req.Headers['Authorization'] -ne "Bearer $($script:Secret)") {
       return Reply $ctx 401 ([ordered]@{ error = '密钥不对' })
@@ -983,6 +1069,14 @@ function Handle($ctx) {
       if ($path -eq '/profile' -and $method -eq 'GET') {
         $p = if (Test-Path $ProfileFile) { [System.IO.File]::ReadAllText($ProfileFile, $utf8) } else { 'null' }
         return ReplyRaw $ctx 200 ('{"profile":' + $p + ',"defaults":' + (ConvertTo-Json -InputObject (InstallDefaults) -Compress) + '}')
+      }
+      if ($path -eq '/update' -and $method -eq 'GET') { if ($script:upd.checked) { return Reply $ctx 200 (UpdateView) } else { return Reply $ctx 200 (CheckUpdate) } }
+      if ($path -eq '/update/check' -and $method -eq 'POST') { return Reply $ctx 200 (CheckUpdate) }
+      if ($path -eq '/update/install' -and $method -eq 'POST') {
+        $result = InstallUpdate
+        Reply $ctx 200 $result
+        if ($result.helper_restart) { Log '助手已更新，退出后几秒内由计划任务拉起新版'; $script:restartSelf = $true }
+        return
       }
       if ($req.ContentLength64 -gt $MaxBody) { Bad '内容太大' }
       $text = (New-Object System.IO.StreamReader($req.InputStream, $utf8)).ReadToEnd()
@@ -1055,7 +1149,10 @@ Log "已启动：127.0.0.1:$Port，安装目录 $Dir"
 try { StartTraffic } catch { Log "流量统计启动失败：$_" }
 while ($listener.IsListening -and -not $script:restartSelf) {
   $wait = $listener.BeginGetContext($null, $null)
-  while (-not $wait.AsyncWaitHandle.WaitOne(1000)) { Supervise }
+  while (-not $wait.AsyncWaitHandle.WaitOne(1000)) {
+    Supervise
+    if ((Get-Date) -ge $script:nextUpdateCheck) { [void](CheckUpdate) }  # 每天查一次新版本
+  }
   $ctx = $listener.EndGetContext($wait)
   try { Handle $ctx }
   catch {

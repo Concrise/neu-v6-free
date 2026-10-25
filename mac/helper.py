@@ -25,10 +25,13 @@
 五、客户端（/profile、/fetch、/apply）：订阅、节点、设置在面板里管。设置存在安装目录的 profile.json；
    助手代面板下载订阅（浏览器有跨域限制）；面板在浏览器里生成配置后交给 /apply，和 update.sh 一样检查、安装、不通就换回。
 
-只监听 127.0.0.1。/rules、/profile、/fetch、/apply 都要带和 Clash API 相同的密钥；网页发来的请求只认面板页面。
+六、自动更新（/update、/update/check、/update/install）：每天查一次 GitHub 上本项目的最新发布，面板里点「更新」后
+   下载 macOS 安装包、按 SHA256SUMS 校验，换上新的面板、生成器、规则集和助手本身；配置、订阅与设置、我的规则不动。
+
+只监听 127.0.0.1。/rules、/profile、/fetch、/apply、/update 都要带和 Clash API 相同的密钥；网页发来的请求只认面板页面。
 用法：helper.py -c config.json -d 状态目录 [-p 9091] [-l 服务名]
 """
-import argparse, filecmp, glob, ipaddress, json, os, re, shutil, signal, subprocess, tempfile, threading, time, urllib.parse, urllib.request
+import argparse, filecmp, glob, hashlib, io, ipaddress, json, os, re, shutil, signal, subprocess, tempfile, threading, time, urllib.parse, urllib.request, zipfile
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -660,6 +663,8 @@ def apply_update(src):
             os.makedirs(os.path.join(panel_dir, "lib"), exist_ok=True)
             for f in libs:
                 install_file(f, os.path.join(panel_dir, "lib", os.path.basename(f)))
+        if os.path.isfile(os.path.join(src, "VERSION")):
+            install_file(os.path.join(src, "VERSION"), VERSION_FILE)
         if os.path.isfile(os.path.join(src, "profile.json")):  # update.sh：命令行的设置覆盖面板里的
             install_file(os.path.join(src, "profile.json"), PROFILE, 0o600)
         staged = CONFIG + ".new"
@@ -800,6 +805,106 @@ def apply_inline(body):
         shutil.rmtree(stage, ignore_errors=True)
 
 
+# ---------- 自动更新：从 GitHub Releases 升级程序本身 ----------
+# 只从本仓库的正式发布下载 macOS 安装包，按同一发布里的 SHA256SUMS 校验；装的是面板、生成器、规则集、本地助手和脚本，
+# 配置、订阅与设置、我的规则都不动（新生成器要在面板里点一次「应用」才用上）。每天自动查一次，装要用户在面板里点
+UPDATE_REPO = "Concrise/neu-v6-free"
+UPDATE_API = os.environ.get("NEU_UPDATE_API") or f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"  # 环境变量只给测试用
+UPDATE_PREFIX = "" if os.environ.get("NEU_UPDATE_API") else f"https://github.com/{UPDATE_REPO}/releases/download/"
+VERSION_FILE = os.path.join(ETC_DIR, "VERSION")
+update_state = {"latest": None, "notes": "", "url": None, "asset": None, "sums": None, "checked": None, "error": None}
+
+
+def current_version():
+    try:
+        return open(VERSION_FILE).read().strip() or "0"
+    except OSError:
+        return "0"  # 1.0.0 及更早的安装没有版本文件
+
+
+def vtuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", v or "")[:3]) or (0,)
+
+
+def update_view():
+    u, cur = update_state, current_version()
+    newer = bool(u["latest"]) and vtuple(u["latest"]) > vtuple(cur)
+    error = u["error"] or ("新版本还没有 macOS 安装包" if newer and not u["asset"] else None)
+    return {"current": cur, "latest": u["latest"], "available": newer and bool(u["asset"]), "notes": u["notes"], "url": u["url"],
+            "checked": u["checked"], "error": error}
+
+
+def check_update():
+    try:
+        _, data = download(UPDATE_API, limit=1 << 20)
+        rel = json.loads(data)
+        assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets") or []}
+        mac = next((n for n in assets if n.endswith("-macos.zip")), None)
+        update_state.update(latest=str(rel["tag_name"]).lstrip("v"), notes=rel.get("body") or "", url=rel.get("html_url"),
+                            asset=mac and {"name": mac, "url": assets[mac]}, sums=assets.get("SHA256SUMS"), error=None)
+    except (BadConfig, ValueError, KeyError) as e:
+        update_state["error"] = f"检查更新失败：{e}"
+    update_state["checked"] = datetime.now().isoformat(timespec="seconds")
+    return update_view()
+
+
+def install_update():
+    v = check_update()
+    if not v["available"]:
+        raise BadConfig(v.get("error") or "已经是最新版本")
+    a = update_state["asset"]
+    for url in (a["url"], update_state["sums"] or ""):
+        if not url.startswith(UPDATE_PREFIX):
+            raise BadConfig(f"下载地址不是本项目的发布：{url}")
+    if not update_state["sums"]:
+        raise BadConfig("发布里没有 SHA256SUMS，没法校验，不安装")
+    _, z = download(a["url"], limit=60 << 20)
+    _, sums = download(update_state["sums"], limit=1 << 16)
+    want = next((l.split()[0] for l in sums.decode().splitlines() if l.strip().endswith(a["name"])), None)
+    if not want or hashlib.sha256(z).hexdigest() != want.lower():
+        raise BadConfig("安装包校验不通过（SHA256 不符），没有安装")
+    old = current_version()
+    stage = tempfile.mkdtemp(prefix=".update-", dir=ETC_DIR)
+    try:
+        with zipfile.ZipFile(io.BytesIO(z)) as zf:
+            for n in zf.namelist():
+                if n.startswith("/") or ".." in n.split("/"):
+                    raise BadConfig(f"安装包里有不安全的路径：{n}")
+            zf.extractall(stage)
+        pkg = next((os.path.dirname(f) for f in glob.glob(os.path.join(stage, "*", "VERSION"))), None)
+        if not pkg or not os.path.isfile(os.path.join(pkg, "helper.py")):
+            raise BadConfig("安装包的结构不对")
+        new_helper = os.path.join(pkg, "helper.py")
+        restart = not filecmp.cmp(new_helper, os.path.abspath(__file__), shallow=False)
+        with apply_lock:
+            panel_dir = (cfg["experimental"]["clash_api"].get("external_ui")) or os.path.join(ETC_DIR, "panel")
+            install_file(os.path.join(pkg, "panel", "index.html"), os.path.join(panel_dir, "index.html"))
+            os.makedirs(os.path.join(panel_dir, "lib"), exist_ok=True)
+            for f in glob.glob(os.path.join(pkg, "panel", "lib", "*")):
+                install_file(f, os.path.join(panel_dir, "lib", os.path.basename(f)))
+            rules_dir = RULES_DIR or os.path.join(ETC_DIR, "rules")
+            for f in glob.glob(os.path.join(pkg, "rules", "*.srs")):  # 规则集顺便换成新的
+                install_file(f, os.path.join(rules_dir, os.path.basename(f)))
+            for name in ("uninstall.sh", "helper-service.sh"):
+                if os.path.isfile(os.path.join(pkg, name)):
+                    install_file(os.path.join(pkg, name), os.path.join(BIN_DIR, name), 0o755)
+            install_file(new_helper, os.path.join(BIN_DIR, "helper.py"), 0o755)
+            install_file(os.path.join(pkg, "VERSION"), VERSION_FILE)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    log(f"已从 {old} 更新到 {current_version()}")
+    if restart:
+        threading.Timer(1.0, stop).start()  # 退出后 launchd 拉起新版助手
+    return {"ok": True, "from": old, "to": current_version(), "helper_restart": restart}
+
+
+def update_checker():
+    time.sleep(90)
+    while True:
+        check_update()
+        time.sleep(24 * 3600)
+
+
 # sing-box 停掉时面板（由 sing-box 提供）打不开，助手自己给一个最简单的状态页
 STATUS_PAGE = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>校园网 v6 免流 · 状态</title><style>body{font:15px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;max-width:620px;margin:40px auto;padding:0 16px;color:#1c2027}
@@ -867,10 +972,15 @@ class Handler(BaseHTTPRequestHandler):
             if not self.authorized():
                 return self.reply(401, {"error": "密钥不对"})
             self.reply(200, {"profile": load_profile(), "defaults": install_defaults()})
+        elif path == "/update":
+            if not self.authorized():
+                return self.reply(401, {"error": "密钥不对"})
+            self.reply(200, update_view() if update_state["checked"] else check_update())
         elif path == "/health":
             self.reply(200, {"ok": True, "rules": bool(TARGETS), "traffic": True, "apply": True, "client": True,
                              "singbox": singbox_running(), "safe_mode": safe_mode(), "server_fallback": server_fallback(),
-                             "server_checked": guard_state["checked"]})
+                             "server_checked": guard_state["checked"], "version": current_version(),
+                             "update": {"latest": update_state["latest"], "available": update_view()["available"]}})
         elif path == "/":
             body = STATUS_PAGE.encode()
             self.send_response(200)
@@ -927,6 +1037,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(500, {"error": f"更新失败：{e}"})
         elif path == "/fetch":
             self.client_call(lambda b: fetch_subscription(b.get("url")))
+        elif path == "/update/check":
+            self.client_call(lambda b: check_update())
+        elif path == "/update/install":
+            self.client_call(lambda b: install_update())
         elif path in ("/pause", "/resume"):
             if not self.authorized(own_page=True):
                 return self.reply(401, {"error": "密钥不对"})
@@ -973,6 +1087,7 @@ if safe_mode() and singbox_running():
     subprocess.run(["launchctl", "bootout", f"system/{args.label}"], capture_output=True, timeout=60)
     log("安全模式：保持 sing-box 停止")
 threading.Thread(target=collect, daemon=True).start()
+threading.Thread(target=update_checker, daemon=True).start()
 if args.label:
     threading.Thread(target=watchdog, daemon=True).start()
 ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()
