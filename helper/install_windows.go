@@ -136,6 +136,9 @@ func stopService(s *mgr.Service) {
 // Windows 服务：开机自动启动（SYSTEM），退出代码不为 0（升级后重启、出错）就在几秒后重新拉起
 func registerService(p Paths, port int) error {
 	hidden(exec.Command("schtasks", "/delete", "/tn", oldTask, "/f")).Run()
+	for _, f := range []string{"helper.ps1", "install.ps1", "update.ps1", "uninstall.ps1", "sing-box.out.log"} { // 旧版的 PowerShell 脚本
+		os.Remove(filepath.Join(p.Bin, f))
+	}
 	m, err := mgr.Connect()
 	if err != nil {
 		return err
@@ -272,15 +275,56 @@ func psq(s string) string { return strings.ReplaceAll(s, "'", "''") }
 // 经 explorer 打开：App / 浏览器不会以管理员身份运行
 func openApp(p Paths, secret, _ string) {
 	if app := appExe(p); exists(app) {
-		exec.Command("explorer.exe", app).Start()
+		if inSession0() {
+			// 以 SYSTEM 运行（1.1.x 的助手自动升级上来）：explorer 打开的窗口在看不见的服务会话里，改在登录用户的桌面上打开
+			if err := startAsConsoleUser(app); err != nil {
+				say("没能替登录的用户打开 App（%v）：从开始菜单打开即可。", err)
+			}
+		} else {
+			exec.Command("explorer.exe", app).Start()
+		}
 		say("以后从开始菜单、桌面的「%s」或右下角托盘的 v6 图标打开；关掉窗口、退出 App 都不影响免流。", displayName)
-	} else if secret != "" {
+	} else if secret != "" && !inSession0() {
 		// 没有 App（命令行安装）：密钥放在网址的 # 后面（不会发给任何服务器），面板读到后自动登录
 		exec.Command("explorer.exe", "http://127.0.0.1:9090/ui/#secret="+secret).Start()
 	}
 }
 
 // App：关掉，删开始菜单和桌面的入口、当前用户的开机自动打开
+func inSession0() bool {
+	var sess uint32
+	return windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &sess) == nil && sess == 0
+}
+
+// 用登录到桌面的用户的身份和环境变量启动（App 的 WebView2 数据放在用户自己的 %LOCALAPPDATA%）
+func startAsConsoleUser(exe string) error {
+	sess := windows.WTSGetActiveConsoleSessionId()
+	if sess == 0xFFFFFFFF {
+		return fmt.Errorf("没有登录的用户")
+	}
+	var tok windows.Token
+	if err := windows.WTSQueryUserToken(sess, &tok); err != nil {
+		return err
+	}
+	defer tok.Close()
+	var env *uint16
+	if err := windows.CreateEnvironmentBlock(&env, tok, false); err != nil {
+		return err
+	}
+	defer windows.DestroyEnvironmentBlock(env)
+	desk, _ := windows.UTF16PtrFromString(`winsta0\default`)
+	cmd, _ := windows.UTF16PtrFromString(syscall.EscapeArg(exe))
+	dir, _ := windows.UTF16PtrFromString(filepath.Dir(exe))
+	si := windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfo{})), Desktop: desk}
+	var pi windows.ProcessInformation
+	if err := windows.CreateProcessAsUser(tok, nil, cmd, nil, nil, false, windows.CREATE_UNICODE_ENVIRONMENT, env, dir, &si, &pi); err != nil {
+		return err
+	}
+	windows.CloseHandle(pi.Thread)
+	windows.CloseHandle(pi.Process)
+	return nil
+}
+
 func removeApp(p Paths) {
 	killApp(p)
 	for _, l := range append(shortcuts, oldShortcut) {

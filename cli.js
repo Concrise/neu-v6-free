@@ -348,7 +348,11 @@ async function packageExtras(platform, dir, out) {
   }
   const base = `neu-v6-free-${VERSION}-${platform === "mac" ? "macos" : platform}`;
   fs.rmSync(path.join(out, `${base}.zip`), { force: true });
+  // 1.1.x 的助手一键更新时只认带 helper.py / helper.ps1 的包：放一个过渡脚本，由它下载新版并运行安装程序（只放进 zip）
+  const shim = platform === "mac" ? "helper.py" : "helper.ps1";
+  fs.copyFileSync(path.join(ROOT, platform, "migrate", shim), path.join(dir, shim));
   execFileSync("zip", ["-qr", "-X", `${base}.zip`, path.basename(dir)], { cwd: out });
+  fs.rmSync(path.join(dir, shim));
   addSum(out, `${base}.zip`);
   console.log(`已打包 ${path.join(out, base + ".zip")}`);
   const license = await singBoxLicense(out);

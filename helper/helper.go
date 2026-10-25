@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -101,6 +102,8 @@ func runHelper(p Paths, port int, noSB bool, stop <-chan struct{}) int {
 	protect(p.Config() + ".prev")
 	protect(p.Config() + ".new")
 	cleanOldFiles(p)
+	removeMigrateStages(p)
+	go func() { time.Sleep(5 * time.Minute); removeMigrateStages(p) }() // 安装程序可能还在里面运行（windows 上删不掉正在运行的程序）
 	h.traffic = newTraffic(h)
 	c := h.conf()
 	if len(c.Targets) > 0 {
@@ -163,4 +166,14 @@ func trimErr(s string, n int) string {
 		return s[len(s)-n:]
 	}
 	return s
+}
+
+// 1.1.x 自动升级时，迁移脚本（安装包里的 helper.py / helper.ps1）把新版安装包解压在 .migrate-* 里运行安装程序
+func removeMigrateStages(p Paths) {
+	for _, d := range uniq(p.Etc, p.Bin) {
+		dirs, _ := filepath.Glob(filepath.Join(d, ".migrate-*"))
+		for _, x := range dirs {
+			os.RemoveAll(x)
+		}
+	}
 }
