@@ -1,5 +1,5 @@
 ﻿# 卸载 Windows 版：停掉 sing-box 和本地助手，删除计划任务、配置、面板和 sing-box.exe。
-# 用法：右键 →「使用 PowerShell 运行」；加 -Purge 连「我的规则」和流量统计一起删。
+# 用法：右键 →「使用 PowerShell 运行」；加 -Purge 连「我的规则」、订阅和设置、流量统计一起删。
 param([switch]$Purge, [switch]$NoPause)
 $ErrorActionPreference = 'Stop'
 $me = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -46,9 +46,9 @@ foreach ($p in 'config.json', 'config.json.prev', 'config.json.new', 'panel', 'd
 Remove-Item (Join-Path $dir 'rules\*.srs') -Force -ErrorAction SilentlyContinue
 if ($Purge) {
   Remove-Item (Join-Path $dir 'rules') -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item (Join-Path $dir 'traffic.json') -Force -ErrorAction SilentlyContinue
-  Write-Host '已卸载，「我的规则」和流量统计也已删除。'
+  Remove-Item (Join-Path $dir 'traffic.json'), (Join-Path $dir 'profile.json') -Force -ErrorAction SilentlyContinue
+  Write-Host '已卸载，「我的规则」、订阅和设置、流量统计也都已删除。'
 } else {
-  Write-Host "已卸载。「我的规则」（$dir\rules）和流量统计（traffic.json）保留，重新安装后接着用；要一起删除：uninstall.ps1 -Purge"
+  Write-Host "已卸载。「我的规则」（$dir\rules）、订阅和设置（profile.json）、流量统计（traffic.json）保留，重新安装后接着用；要一起删除：uninstall.ps1 -Purge"
 }
 if (-not $NoPause) { Read-Host '按回车关闭' | Out-Null }

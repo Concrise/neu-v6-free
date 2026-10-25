@@ -18,5 +18,5 @@ else
   rm -rf "$ETC_DIR/config.json" "$ETC_DIR/panel" "$VAR_DIR"/*.log "$VAR_DIR"/*.db
   rm -f "$ETC_DIR"/rules/*.srs
   echo "已卸载。可以重新打开其他代理软件。"
-  echo "「我的规则」和流量统计保留在 $ETC_DIR/rules、$VAR_DIR，重新安装后接着用；要全部删除：sudo $0 --purge"
+  echo "「我的规则」、订阅和设置（$ETC_DIR/rules、profile.json）以及流量统计（$VAR_DIR）保留，重新安装后接着用；要全部删除：sudo $0 --purge"
 fi

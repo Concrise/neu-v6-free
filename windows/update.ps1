@@ -13,19 +13,30 @@ try {
   $port = 9091
   try { $port = [int](([IO.File]::ReadAllText((Join-Path $src 'panel\groups.json'), $utf8) | ConvertFrom-Json).traffic_port) } catch { }
   $body = ConvertTo-Json -InputObject @{ src = $src } -Compress
-  try {
-    $r = Invoke-RestMethod -Uri "http://127.0.0.1:$port/apply" -Method Post -Body ([Text.Encoding]::UTF8.GetBytes($body)) `
-      -ContentType 'application/json; charset=utf-8' -Headers @{ Authorization = "Bearer $secret" } -TimeoutSec 180
-  } catch [System.Net.WebException] {
-    $resp = $_.Exception.Response
-    if (-not $resp) { throw "连不上本地助手（127.0.0.1:$port）：还没安装就先运行 install.ps1；装过的话看 C:\neu-v6-free\helper.log" }
-    $msg = (New-Object IO.StreamReader($resp.GetResponseStream(), [Text.Encoding]::UTF8)).ReadToEnd()
-    try { $msg = ($msg | ConvertFrom-Json).error } catch { }
-    throw $msg
+  $apply = {
+    try {
+      Invoke-RestMethod -Uri "http://127.0.0.1:$port/apply" -Method Post -Body ([Text.Encoding]::UTF8.GetBytes($body)) `
+        -ContentType 'application/json; charset=utf-8' -Headers @{ Authorization = "Bearer $secret" } -TimeoutSec 180
+    } catch [System.Net.WebException] {
+      $resp = $_.Exception.Response
+      if (-not $resp) { throw "连不上本地助手（127.0.0.1:$port）：还没安装就先运行 install.ps1；装过的话看 C:\neu-v6-free\helper.log" }
+      $msg = (New-Object IO.StreamReader($resp.GetResponseStream(), [Text.Encoding]::UTF8)).ReadToEnd()
+      try { $msg = ($msg | ConvertFrom-Json).error } catch { }
+      throw $msg
+    }
+  }
+  $r = & $apply
+  if ($r.helper_updated) {
+    # 助手刚升级：旧版助手不认识新增的文件（如面板的 panel\lib），等新版起来再交一遍
+    Write-Host '本地助手已升级，等它重启后再装一遍新增的文件……'
+    for ($i = 0; $i -lt 40; $i++) {
+      Start-Sleep -Seconds 1
+      try { if ((Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 2).client) { break } } catch { }
+    }
+    $r = & $apply
   }
   Write-Host '已更新并重启 sing-box。' -ForegroundColor Green
   if ($r.server_fallback) { Write-Host '注意：当前网络连不上免流服务器，已自动改走「不用服务器」；能连上后会自动切回。' -ForegroundColor Yellow }
-  if ($r.helper_updated) { Write-Host '本地助手也升级了，几秒后自动重启（这几秒面板里暂时不能加规则）。' }
 } catch {
   Write-Host "更新失败：$($_.Exception.Message)" -ForegroundColor Red
   $code = 1

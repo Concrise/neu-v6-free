@@ -22,7 +22,10 @@
    服务器单独看：当前网络连不上免流服务器（离开校园网、换了热点、服务器挂了）而网络本身是通的，
    就把「免流服务器」自动切到「不用服务器」，经服务器的流量改为直连；每两分钟试一次，连上了自动切回。
 
-只监听 127.0.0.1。/rules 和 /apply 要带和 Clash API 相同的密钥；/rules 只接受面板页面的跨域请求，/apply 不接受任何网页的请求。
+五、客户端（/profile、/fetch、/apply）：订阅、节点、设置在面板里管。设置存在安装目录的 profile.json；
+   助手代面板下载订阅（浏览器有跨域限制）；面板在浏览器里生成配置后交给 /apply，和 update.sh 一样检查、安装、不通就换回。
+
+只监听 127.0.0.1。/rules、/profile、/fetch、/apply 都要带和 Clash API 相同的密钥；网页发来的请求只认面板页面。
 用法：helper.py -c config.json -d 状态目录 [-p 9091] [-l 服务名]
 """
 import argparse, filecmp, glob, ipaddress, json, os, re, shutil, signal, subprocess, tempfile, threading, time, urllib.parse, urllib.request
@@ -652,6 +655,13 @@ def apply_update(src):
         for name in ("index.html", "groups.json"):
             if os.path.isfile(os.path.join(src, "panel", name)):
                 install_file(os.path.join(src, "panel", name), os.path.join(panel_dir, name))
+        libs = glob.glob(os.path.join(src, "panel", "lib", "*.js")) + glob.glob(os.path.join(src, "panel", "lib", "*.mjs"))
+        if libs:  # 面板在浏览器里生成配置用的模块
+            os.makedirs(os.path.join(panel_dir, "lib"), exist_ok=True)
+            for f in libs:
+                install_file(f, os.path.join(panel_dir, "lib", os.path.basename(f)))
+        if os.path.isfile(os.path.join(src, "profile.json")):  # update.sh：命令行的设置覆盖面板里的
+            install_file(os.path.join(src, "profile.json"), PROFILE, 0o600)
         staged = CONFIG + ".new"
         install_file(cfg_file, staged, 0o600)
         r = subprocess.run([os.path.join(BIN_DIR, "sing-box"), "check", "--disable-color", "-c", staged], capture_output=True, text=True, timeout=120)
@@ -688,6 +698,106 @@ def apply_update(src):
         if restarted:
             server_check(quick=True)
     return {"ok": True, "restarted": restarted, "helper_updated": helper_updated, "server_fallback": server_fallback()}
+
+
+# ---------- 客户端：订阅、节点、设置都在面板里管 ----------
+# 面板保存的全部设置（订阅链接与内容、手动节点、模式、服务器……）存在安装目录的 profile.json，只有 root 能读。
+# 面板在浏览器里用 lib/build.js 生成配置，再交给 /apply 安装；助手只负责存取设置、代为下载订阅（浏览器有跨域限制）
+PROFILE = os.path.join(ETC_DIR, "profile.json")
+MAX_BODY = 32 << 20
+MAX_DOWNLOAD = 20 << 20
+SAFE_NAME = re.compile(r"^[\w.!+-]+$")
+
+
+def install_defaults():
+    """和这次安装绑定、面板不该改的设置：从正在用的配置里读。面板生成配置时用它们覆盖 profile 里的同名项。"""
+    clash = cfg["experimental"]["clash_api"]
+    main = next((i for i in cfg.get("inbounds", []) if i.get("tag") == "main"), {})
+    srs = [rs["path"] for rs in cfg["route"].get("rule_set", []) if rs.get("type") == "local" and rs.get("format") == "binary"]
+    return {"platform": "mac", "clash_api": clash["external_controller"], "clash_api_secret": SECRET,
+            "panel_dir": clash.get("external_ui") or os.path.join(ETC_DIR, "panel"),
+            "rules_dir": os.path.dirname(srs[0]) if srs else os.path.join(ETC_DIR, "rules"),
+            "listen": main.get("listen", "127.0.0.1"), "main_port": main.get("listen_port", 10808), "traffic_port": args.port}
+
+
+def load_profile():
+    try:
+        with open(PROFILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def save_profile(p):
+    if not isinstance(p, dict):
+        raise BadConfig("设置的格式不对")
+    tmp = PROFILE + ".tmp"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
+        json.dump(p, f, ensure_ascii=False)
+    os.replace(tmp, PROFILE)
+    return {"ok": True}
+
+
+def download(url, limit=MAX_DOWNLOAD, ua="neu-v6-free"):
+    u = urllib.parse.urlsplit(url or "")
+    if u.scheme not in ("http", "https") or not u.hostname:
+        raise BadConfig("只支持 http / https 链接")
+    req = urllib.request.Request(url, headers={"User-Agent": ua})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read(limit + 1)
+            if len(data) > limit:
+                raise BadConfig(f"内容太大（超过 {limit >> 20}MB）")
+            return r, data
+    except urllib.error.HTTPError as e:
+        raise BadConfig(f"服务器返回 {e.code}（链接失效或过期？）")
+    except (urllib.error.URLError, OSError) as e:
+        raise BadConfig(f"下载失败：{getattr(e, 'reason', e)}")
+
+
+def fetch_subscription(url):
+    # 带 clash.meta 的 User-Agent：多数机场据此返回完整的 mihomo 配置（不然给的是 base64 链接，信息更少）
+    r, data = download(url, ua="clash.meta (neu-v6-free)")
+    return {"status": r.status, "text": data.decode("utf-8", "replace"),
+            "userinfo": r.headers.get("subscription-userinfo"), "disposition": r.headers.get("content-disposition")}
+
+
+def apply_inline(body):
+    """面板生成的配置：放进临时生成目录（和 cli.js 的输出一样的结构），缺的规则集按面板给的地址下载，再走 apply_update。"""
+    conf, panel = body.get("config"), body.get("panel")
+    # 面板发来的是 JSON 文本（Windows 的助手要原样写盘）；也接受对象
+    conf, panel = [json.loads(x) if isinstance(x, str) else x for x in (conf, panel)]
+    if not isinstance(conf, dict) or not isinstance(panel, dict):
+        raise BadConfig("缺少 config 或 panel")
+    check_paths(conf)
+    urls = body.get("rule_sets") or {}
+    stage = tempfile.mkdtemp(prefix=".stage-", dir=ETC_DIR)
+    try:
+        os.makedirs(os.path.join(stage, "rules"))
+        os.makedirs(os.path.join(stage, "panel"))
+        with open(os.path.join(stage, "config.json"), "w", encoding="utf-8") as f:
+            json.dump(conf, f, ensure_ascii=False)
+        with open(os.path.join(stage, "panel", "groups.json"), "w", encoding="utf-8") as f:
+            json.dump(panel, f, ensure_ascii=False)
+        for rs in (conf.get("route") or {}).get("rule_set") or []:
+            if rs.get("type") != "local":
+                continue
+            name = os.path.basename(rs.get("path") or "")
+            if not SAFE_NAME.match(name):
+                raise BadConfig(f"规则集文件名不对：{name}")
+            if rs.get("format") == "source":  # 「我的规则」的文件：apply_update 只补缺的
+                with open(os.path.join(stage, "rules", name), "w") as f:
+                    f.write('{"version":2,"rules":[]}\n')
+            elif not os.path.exists(rs["path"]):
+                url = urls.get(rs.get("tag"))
+                if not (isinstance(url, str) and url.startswith("https://")):
+                    raise BadConfig(f"本机没有规则集 {rs.get('tag')}，也没有给下载地址")
+                _, data = download(url)
+                with open(os.path.join(stage, "rules", name), "wb") as f:
+                    f.write(data)
+        return apply_update(stage)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 # sing-box 停掉时面板（由 sing-box 提供）打不开，助手自己给一个最简单的状态页
@@ -753,8 +863,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(404, {"error": "这份配置没有开「我的规则」（user_rules: false）"})
             with rules_lock:
                 self.reply(200, rules_view(load_rules()))
+        elif path == "/profile":
+            if not self.authorized():
+                return self.reply(401, {"error": "密钥不对"})
+            self.reply(200, {"profile": load_profile(), "defaults": install_defaults()})
         elif path == "/health":
-            self.reply(200, {"ok": True, "rules": bool(TARGETS), "traffic": True, "apply": True,
+            self.reply(200, {"ok": True, "rules": bool(TARGETS), "traffic": True, "apply": True, "client": True,
                              "singbox": singbox_running(), "safe_mode": safe_mode(), "server_fallback": server_fallback(),
                              "server_checked": guard_state["checked"]})
         elif path == "/":
@@ -780,20 +894,39 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, OSError) as e:
             self.reply(500, {"error": f"保存失败：{e}"})
 
+    def body(self, limit=MAX_BODY):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > limit:
+            raise BadConfig("内容太大")
+        return json.loads(self.rfile.read(n) or b"{}")
+
+    def client_call(self, fn):
+        """面板的客户端功能（设置、订阅、安装面板生成的配置）：和 /rules 一样只认面板页面 + 密钥。"""
+        if not SECRET or not self.authorized():
+            return self.reply(401, {"error": "密钥不对"})
+        try:
+            self.reply(200, fn(self.body()))
+        except BadConfig as e:
+            self.reply(400, {"error": str(e)})
+        except (ValueError, OSError, subprocess.SubprocessError) as e:
+            self.reply(500, {"error": f"出错了：{e}"})
+
     def do_POST(self):
         path = self.path.split("?")[0]
-        if path == "/apply":
-            # 只给本机脚本用：网页发来的一律拒绝；必须有密钥
-            if self.headers.get("Origin") or not SECRET or self.headers.get("Authorization") != "Bearer " + SECRET:
-                return self.reply(401, {"error": "密钥不对（或请求来自网页）"})
+        if path == "/apply" and self.headers.get("Origin"):
+            self.client_call(apply_inline)
+        elif path == "/apply":
+            # 本机脚本（update.sh）：交来生成目录的路径；必须有密钥
+            if not SECRET or self.headers.get("Authorization") != "Bearer " + SECRET:
+                return self.reply(401, {"error": "密钥不对"})
             try:
-                n = int(self.headers.get("Content-Length") or 0)
-                body = json.loads(self.rfile.read(min(n, 1 << 16)) or b"{}")
-                self.reply(200, apply_update(body.get("src")))
+                self.reply(200, apply_update(self.body(1 << 16).get("src")))
             except BadConfig as e:
                 self.reply(400, {"error": str(e)})
             except (ValueError, OSError, subprocess.SubprocessError) as e:
                 self.reply(500, {"error": f"更新失败：{e}"})
+        elif path == "/fetch":
+            self.client_call(lambda b: fetch_subscription(b.get("url")))
         elif path in ("/pause", "/resume"):
             if not self.authorized(own_page=True):
                 return self.reply(401, {"error": "密钥不对"})
@@ -815,6 +948,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         if self.path.split("?")[0] == "/rules":
             self.change("replace")
+        elif self.path.split("?")[0] == "/profile":
+            self.client_call(save_profile)
         else:
             self.send_error(404)
 

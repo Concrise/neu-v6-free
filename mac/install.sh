@@ -1,8 +1,10 @@
 #!/bin/bash
 # 第一次安装（只有这一次要 sudo）：把生成的 mac 配置装成 LaunchDaemon（开机自启、崩溃自动拉起，含 TUN），
 # 并装好本地助手（「我的规则」、流量统计、免 sudo 更新）。以后改了设置用 mac/update.sh，不用 sudo。
-# 用法：sudo mac/install.sh [sing-box 可执行文件] [生成目录，默认 out/mac]
-#   不指定 sing-box 时依次找：PATH 里的 sing-box（如 brew install sing-box）→ v2rayN 自带的
+# 用法：sudo mac/install.sh [sing-box 可执行文件] [生成目录，默认：本脚本旁边有 config.json 就用这里（发布包），否则 out/mac]
+#   不指定 sing-box 时依次找：PATH 里的 sing-box（如 brew install sing-box）→ v2rayN 自带的 → 从 GitHub 下载官方最新版
+# 发布包（GitHub Releases 的 zip）里的配置是「起步配置」：面板密钥是占位符，第一次安装时随机生成；
+# 已经装过时只升级程序和面板，保留现有配置和面板里的订阅、设置。
 # 可用环境变量改名（多套共存或沿用旧安装）：NAME（安装目录名，默认 neu-v6-free）、LABEL（服务名）
 # 注意：配置里的 rules_dir / panel_dir 要和这里的安装目录一致（默认都是 /usr/local/etc/neu-v6-free）
 set -euo pipefail
@@ -15,10 +17,20 @@ if [ -z "$SRC_BIN" ]; then
     /Applications/v2rayN.app/Contents/MacOS/bin/sing_box/sing-box; do
     [ -n "$c" ] && [ -x "$c" ] && { SRC_BIN=$c; break; }
   done
-  [ -n "$SRC_BIN" ] || { echo "找不到 sing-box：先 brew install sing-box，或把可执行文件路径作为第一个参数"; exit 1; }
+  if [ -z "$SRC_BIN" ]; then
+    ARCH=$(uname -m); [ "$ARCH" = x86_64 ] && ARCH=amd64
+    TAG=$(curl -fsSL -m 30 https://api.github.com/repos/SagerNet/sing-box/releases/latest | /usr/bin/python3 -c "import json,sys;print(json.load(sys.stdin)['tag_name'])") \
+      || { echo "找不到 sing-box，也没能从 GitHub 下载：先 brew install sing-box，或把可执行文件路径作为第一个参数"; exit 1; }
+    DL=$(mktemp -d /tmp/neu-v6-singbox.XXXXXX)
+    curl -fsSL -m 300 -o "$DL/sb.tgz" "https://github.com/SagerNet/sing-box/releases/download/$TAG/sing-box-${TAG#v}-darwin-$ARCH.tar.gz"
+    tar -xzf "$DL/sb.tgz" -C "$DL"
+    SRC_BIN=$(find "$DL" -name sing-box -type f | head -1)
+    trap 'rm -rf "$DL"' EXIT
+  fi
   echo "sing-box：$SRC_BIN（$("$SRC_BIN" version | head -1)）"
 fi
-SRC=${2:-out/mac}
+HERE=$(cd "$(dirname "$0")" && pwd)
+if [ -n "${2:-}" ]; then SRC=$2; elif [ -f "$HERE/config.json" ]; then SRC=$HERE; else SRC=out/mac; fi
 BIN_DIR=/usr/local/libexec/$NAME
 ETC_DIR=/usr/local/etc/$NAME
 VAR_DIR=/usr/local/var/$NAME
@@ -37,13 +49,35 @@ if lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk -v re=":($PORTS)\$" '$9 ~ re {f
   exit 1
 fi
 
-install -d -o root -g wheel -m 755 "$BIN_DIR" "$ETC_DIR" "$ETC_DIR/rules" "$ETC_DIR/panel"
+install -d -o root -g wheel -m 755 "$BIN_DIR" "$ETC_DIR" "$ETC_DIR/rules" "$ETC_DIR/panel" "$ETC_DIR/panel/lib"
 install -d -o root -g wheel -m 700 "$VAR_DIR"
 rm -f "$VAR_DIR/safe-mode.json" # 重新安装 = 重新启用（清掉之前的安全模式）
 install -o root -g wheel -m 755 "$SRC_BIN" "$BIN_DIR/sing-box"
-install -o root -g wheel -m 600 "$SRC/config.json" "$ETC_DIR/config.json"
+# 起步配置（发布包）：已经装过就保留现有配置；第一次装就生成随机的面板密钥
+STARTER=; grep -q '__NEU_SECRET__' "$SRC/config.json" && STARTER=1
+if [ -n "$STARTER" ] && [ -f "$ETC_DIR/config.json" ]; then
+  echo "已经装过：保留现有的配置和面板里的订阅、设置，只升级程序和面板。"
+else
+  SECRET=$(/usr/bin/python3 -c "import secrets;print(secrets.token_hex(16))")
+  if [ -n "$STARTER" ]; then
+    sed "s/__NEU_SECRET__/$SECRET/g" "$SRC/config.json" > "$ETC_DIR/config.json.tmp"
+    install -o root -g wheel -m 600 "$ETC_DIR/config.json.tmp" "$ETC_DIR/config.json"; rm -f "$ETC_DIR/config.json.tmp"
+  else
+    install -o root -g wheel -m 600 "$SRC/config.json" "$ETC_DIR/config.json"
+  fi
+fi
 install -o root -g wheel -m 644 "$SRC"/rules/*.srs "$ETC_DIR/rules/"
-install -o root -g wheel -m 644 "$SRC"/panel/* "$ETC_DIR/panel/"
+install -o root -g wheel -m 644 "$SRC"/panel/index.html "$ETC_DIR/panel/"
+# 面板的分组说明和配置是一对：保留现有配置（发布包重装）时不换
+[ -n "$STARTER" ] && [ -z "${SECRET:-}" ] || install -o root -g wheel -m 644 "$SRC"/panel/groups.json "$ETC_DIR/panel/"
+[ -d "$SRC/panel/lib" ] && install -o root -g wheel -m 644 "$SRC"/panel/lib/* "$ETC_DIR/panel/lib/"
+# 面板里「订阅与节点」「设置」的数据（含密钥）：命令行生成的覆盖；发布包只在没有时放一份空的
+if [ -f "$SRC/profile.json" ] && { [ -z "$STARTER" ] || [ ! -f "$ETC_DIR/profile.json" ]; }; then
+  install -o root -g wheel -m 600 "$SRC/profile.json" "$ETC_DIR/profile.json"
+elif [ -n "$STARTER" ] && [ -n "${SECRET:-}" ] && [ -f "$ETC_DIR/profile.json" ]; then
+  # 卸载时保留了订阅和设置、这次是重新安装：配置是新的起步配置，提醒在面板里点「应用」
+  /usr/bin/python3 -c "import json,sys;p=json.load(open(sys.argv[1]));p['pending']=True;json.dump(p,open(sys.argv[1],'w'),ensure_ascii=False)" "$ETC_DIR/profile.json"
+fi
 # 「我的规则」文件只补缺的：已经在面板里加过的规则不会被覆盖
 for f in "$SRC"/rules/user-*.json; do
   [ -e "$f" ] && [ ! -e "$ETC_DIR/rules/$(basename "$f")" ] && install -o root -g wheel -m 644 "$f" "$ETC_DIR/rules/"
@@ -110,4 +144,9 @@ else
 fi
 tail -5 "$VAR_DIR/sing-box.log" 2>/dev/null || true
 echo "已安装。面板 http://127.0.0.1:9090/ui"
-echo "以后改了订阅或设置：mac/update.sh（不用 sudo）；卸载：sudo $(dirname "$0")/uninstall.sh"
+if [ -n "$STARTER" ] && [ -n "${SECRET:-}" ]; then
+  # 第一次装：密钥放在网址的 # 后面（不会发给任何服务器），面板读到后自动登录
+  echo "面板密钥：$SECRET（已经帮你在浏览器里登录；换浏览器时要用）"
+  [ -n "${SUDO_USER:-}" ] && sudo -u "$SUDO_USER" open "http://127.0.0.1:9090/ui/#secret=$SECRET" 2>/dev/null || true
+fi
+echo "以后订阅、节点、设置都在面板里改（「订阅与节点」「设置」），不用再运行脚本；卸载：sudo $(dirname "$0")/uninstall.sh"

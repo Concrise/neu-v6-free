@@ -110,6 +110,13 @@ async function getPanelHtml() {
   panelHtml ??= await (await fetch("../panel/index.html")).text();
   return panelHtml;
 }
+// 面板在浏览器里生成配置要用的模块（订阅与节点、设置页），随面板一起装进 panel/lib/
+const PANEL_LIB = ["js-yaml.mjs", "groups.js", "convert.js", "subscription.js", "build.js"];
+let panelLib = null;
+async function getPanelLib() {
+  panelLib ??= await Promise.all(PANEL_LIB.map(async (n) => ({ name: `neu-v6-free/panel/lib/${n}`, data: await (await fetch(`../lib/${n}`)).text() })));
+  return panelLib;
+}
 
 // Windows 脚本按字节取：它们带 UTF-8 BOM（Windows 自带的 PowerShell 5.1 靠它识别中文），按文本读会丢掉
 const WINDOWS_SCRIPTS = ["install.ps1", "update.ps1", "uninstall.ps1", "helper.ps1", "install.bat", "update.bat", "uninstall.bat"];
@@ -144,6 +151,10 @@ async function generate(platform) {
       { name: "neu-v6-free/config.json", data: json },
       { name: "neu-v6-free/panel/index.html", data: await getPanelHtml() },
       { name: "neu-v6-free/panel/groups.json", data: JSON.stringify(panel, null, 1) },
+      ...await getPanelLib(),
+      // 面板里「订阅与节点」「设置」接着用的数据：这次的设置和节点（不单独成组、不排除节点，和这份配置一样）
+      { name: "neu-v6-free/profile.json", data: JSON.stringify({ version: 1, settings, nodes: [], pending: false,
+        subscriptions: parsed.proxies.length ? [{ id: "web", name: "订阅", url: "", enabled: true, group: false, exclude: "", proxies: parsed.proxies }] : [] }) },
       // 本地规则集：Windows 版启动不依赖网络（服务器不通时也能起来）
       ...await getRuleSets(settings),
       // 「我的规则」的空文件：install.ps1 只补缺的，不覆盖已有规则

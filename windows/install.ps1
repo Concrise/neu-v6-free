@@ -5,6 +5,8 @@
 # 用法：在这个文件上右键 →「使用 PowerShell 运行」；或在 PowerShell 里：
 #   powershell -ExecutionPolicy Bypass -File install.ps1 [-SingBox D:\path\sing-box.exe]
 # 不指定 -SingBox 时依次找：旁边的 sing-box.exe → 已安装的 → 从 GitHub 下载官方最新版。重新安装不会覆盖「我的规则」。
+# 发布包（GitHub Releases 的 zip）里的配置是「起步配置」：面板密钥是占位符，第一次安装时随机生成；
+# 已经装过时只升级程序和面板，保留现有配置和面板里的订阅、设置。
 param([string]$SingBox = '', [switch]$NoPause)
 $ErrorActionPreference = 'Stop'
 $src = $PSScriptRoot
@@ -93,6 +95,16 @@ try {
     }
   }
   Write-Host "安装到 $dir"
+  # 起步配置（发布包）：已经装过就保留现有配置；第一次装就生成随机的面板密钥（写进安装目录时替换）
+  $starter = ([IO.File]::ReadAllText($cfgPath, $utf8)).Contains('__NEU_SECRET__')
+  $keep = $starter -and (Test-Path (Join-Path $dir 'config.json'))
+  $secret = $null
+  if ($keep) { Write-Host '已经装过：保留现有的配置和面板里的订阅、设置，只升级程序和面板。' }
+  elseif ($starter) {
+    $b = New-Object byte[] 16
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+    $secret = -join ($b | ForEach-Object { $_.ToString('x2') })
+  }
 
   # 已经装过：先停掉自己的助手和 sing-box（助手稍后会带着 sing-box 一起重启）
   $task = 'neu-v6-free helper'
@@ -109,6 +121,12 @@ try {
 
   New-Item -ItemType Directory -Force -Path $dir, $panelDir, $rulesDir, (Join-Path $dir 'data') | Out-Null
   Remove-Item (Join-Path $dir 'safe-mode.json') -Force -ErrorAction SilentlyContinue  # 重新安装 = 重新启用
+  $cfgDest = Join-Path $dir 'config.json'
+  if ($keep) { $cfgPath = $cfgDest }
+  elseif ($starter) {
+    [IO.File]::WriteAllText($cfgDest, ([IO.File]::ReadAllText($cfgPath, $utf8)).Replace('__NEU_SECRET__', $secret), $utf8)
+    $cfgPath = $cfgDest
+  }
   # 别的代理软件退出后常留下系统代理：指向的端口已经没有程序在听，浏览器就「没网」。这种失效的系统代理直接关掉
   $inet = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
   $ie = Get-ItemProperty $inet
@@ -154,7 +172,21 @@ try {
   # 配置、面板、规则集、助手与脚本
   $same = (& $full $src) -eq $dir
   if (-not $same) {
-    Copy-Item (Join-Path $src 'panel\*') $panelDir -Force
+    # 含 panel\lib（面板生成配置用）。保留现有配置时不换 groups.json：它和配置是一对
+    $meta = Join-Path $panelDir 'groups.json'
+    $keepMeta = if ($keep -and (Test-Path $meta)) { [IO.File]::ReadAllBytes($meta) } else { $null }
+    Copy-Item (Join-Path $src 'panel\*') $panelDir -Recurse -Force
+    if ($keepMeta) { [IO.File]::WriteAllBytes($meta, $keepMeta) }
+    # 面板里「订阅与节点」「设置」的数据（含密钥，只给管理员和 SYSTEM）：命令行生成的覆盖；发布包只在没有时放一份空的
+    $pf = Join-Path $src 'profile.json'; $pfDest = Join-Path $dir 'profile.json'
+    if ((Test-Path $pf) -and (-not $starter -or -not (Test-Path $pfDest))) {
+      Copy-Item $pf $pfDest -Force
+      & icacls $pfDest /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' | Out-Null
+    } elseif ($secret -and (Test-Path $pfDest)) {
+      # 卸载时保留了订阅和设置、这次是重新安装：配置是新的起步配置，提醒在面板里点「应用」
+      $t = [IO.File]::ReadAllText($pfDest, $utf8)
+      if ($t -notmatch '"pending"\s*:\s*true') { [IO.File]::WriteAllText($pfDest, ($t -replace '^\s*\{', '{"pending":true,'), $utf8) }
+    }
     foreach ($f in 'helper.ps1', 'update.ps1', 'uninstall.ps1', 'uninstall.bat') { if (Test-Path (Join-Path $src $f)) { Copy-Item (Join-Path $src $f) $dir -Force } }
     if (Test-Path (Join-Path $src 'rules')) {
       if (Test-Path (Join-Path $src 'rules\*.srs')) { Copy-Item (Join-Path $src 'rules\*.srs') $rulesDir -Force }
@@ -173,7 +205,7 @@ try {
   $out = & $sbDest check --disable-color -c $cfgPath 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) { throw "sing-box 检查配置没通过：$($out.Trim())" }
   $cfgDest = Join-Path $dir 'config.json'
-  if (-not $same) { Copy-Item $cfgPath $cfgDest -Force }
+  if (-not $same -and $cfgPath -ne $cfgDest) { Copy-Item $cfgPath $cfgDest -Force }
   # config.json 里有节点密码和面板密钥：只给管理员、SYSTEM 和当前用户读
   & icacls $cfgDest /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' "$($env:USERDOMAIN)\$($env:USERNAME):R" | Out-Null
 
@@ -233,8 +265,13 @@ try {
   if ($h.server_fallback) { Write-Host "注意：当前网络连不上免流服务器，已自动改走「不用服务器」（经服务器的流量改为直连，IPv4 计费）。回到能连上服务器的网络后会自动切回。" -ForegroundColor Yellow }
   Write-Host '万一以后上不了网：本地助手会自动暂停 sing-box；也可以打开 http://127.0.0.1:9091/ 手动暂停或重新启用。' 
   Write-Host ''
-  Write-Host '面板：http://127.0.0.1:9090/ui （密钥是生成配置时的 clash_api_secret）' -ForegroundColor Cyan
-  Write-Host '以后改了订阅或设置：重新生成，然后运行新生成目录里的 update.ps1（不需要管理员）。'
+  Write-Host '面板：http://127.0.0.1:9090/ui' -ForegroundColor Cyan
+  if ($secret) {
+    # 第一次装：密钥放在网址的 # 后面（不会发给任何服务器），面板读到后自动登录。经 explorer 打开，浏览器不会以管理员身份运行
+    Write-Host "面板密钥：$secret（已经帮你在浏览器里登录；换浏览器时要用）" -ForegroundColor Cyan
+    Start-Process explorer.exe "http://127.0.0.1:9090/ui/#secret=$secret" -ErrorAction SilentlyContinue
+  }
+  Write-Host '以后订阅、节点、设置都在面板里改（「订阅与节点」「设置」），不用再运行脚本。'
   Write-Host "卸载：$dir\uninstall.ps1"
   Done 0
 } catch {

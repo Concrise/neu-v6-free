@@ -11,7 +11,8 @@
 #      每两分钟试一次，连上了自动切回。
 #   5. 物理网卡的 WeakHostSend：sing-box 运行期间关掉（见 FixWeakHost），停止时恢复。
 #   6. 流量统计（/traffic）：和 mac/helper.py 相同的记账方式，存在 traffic.json（见「流量统计」一节）。
-# 只监听 127.0.0.1；/rules 和 /apply 要带和 Clash API 相同的密钥，/rules 只接受面板页面的跨域请求，/apply 不接受任何网页的请求。
+#   7. 客户端（/profile、/fetch、/apply）：订阅、节点、设置在面板里管，设置存在 profile.json；面板生成的配置交给 /apply 安装。
+# 只监听 127.0.0.1；/rules、/profile、/fetch、/apply 都要带和 Clash API 相同的密钥，网页发来的请求只认面板页面。
 # 手动运行（调试用，管理员 PowerShell）：powershell -ExecutionPolicy Bypass -File helper.ps1 [-Dir C:\neu-v6-free] [-Port 9091]
 param(
   [string]$Dir = $PSScriptRoot,
@@ -744,8 +745,19 @@ function ApplyUpdate($src) {
   $panel = Join-Path $Dir 'panel'; $rules = Join-Path $Dir 'rules'
   New-Item -ItemType Directory -Force -Path $panel, $rules | Out-Null
   foreach ($n in 'index.html', 'groups.json') {
-    $p = Join-Path $src "panel\$n"
+    $p = Join-Path (Join-Path $src 'panel') $n
     if (Test-Path $p) { Copy-Item $p (Join-Path $panel $n) -Force }
+  }
+  $lib = Join-Path (Join-Path $src 'panel') 'lib'  # 面板在浏览器里生成配置用的模块
+  if (Test-Path $lib) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $panel 'lib') | Out-Null
+    foreach ($f in Get-ChildItem $lib -File) { Copy-Item $f.FullName (Join-Path (Join-Path $panel 'lib') $f.Name) -Force }
+  }
+  $pf = Join-Path $src 'profile.json'  # update.ps1：命令行的设置覆盖面板里的
+  if (Test-Path $pf) {
+    $new = -not (Test-Path $ProfileFile)
+    Copy-Item $pf $ProfileFile -Force
+    if ($new -and $IsWin) { & icacls $ProfileFile /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' | Out-Null }
   }
   if (Test-Path (Join-Path $src 'rules')) {
     foreach ($f in Get-ChildItem (Join-Path $src 'rules') -Filter '*.srs') { Copy-Item $f.FullName (Join-Path $rules $f.Name) -Force }
@@ -788,6 +800,103 @@ function ApplyUpdate($src) {
   [ordered]@{ ok = $true; restarted = $true; helper_updated = $updated; server_fallback = (LoadFallback) }
 }
 
+# ---------- 客户端：订阅、节点、设置都在面板里管（与 mac/helper.py 相同）----------
+# 面板保存的全部设置存在安装目录的 profile.json（只有管理员和 SYSTEM 能读）。面板在浏览器里用 lib/build.js 生成配置，
+# 再交给 /apply 安装；助手只负责存取设置、代为下载订阅（浏览器有跨域限制）。
+# 设置和配置都按原文存取，不经 ConvertTo-Json：它会截断层数深的 JSON，PowerShell 5.1 的 ConvertFrom-Json 也有 2MB 上限
+$ProfileFile = Join-Path $Dir 'profile.json'
+$MaxBody = 32MB
+$MaxDownload = 20MB
+$Json = $null
+try {  # Windows PowerShell 5.1（.NET Framework）才有；PowerShell 7 用 ConvertFrom-Json -AsHashtable（没有 2MB 上限）
+  Add-Type -AssemblyName System.Web.Extensions
+  $Json = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+  $Json.MaxJsonLength = [int]::MaxValue
+} catch { }
+function ParseJson([string]$text) {
+  if ($Json) { return $Json.DeserializeObject($text) }
+  return ($text | ConvertFrom-Json -AsHashtable)
+}
+
+# 和这次安装绑定、面板不该改的设置：从正在用的配置里读，面板生成配置时用它们覆盖 profile 里的同名项
+function InstallDefaults() {
+  $clash = $script:cfg.experimental.clash_api
+  $main = @(@($script:cfg.inbounds) | Where-Object { $_ -and $_.tag -eq 'main' })[0]
+  $srs = @(@($script:cfg.route.rule_set) | Where-Object { $_ -and $_.type -eq 'local' -and $_.format -eq 'binary' } | ForEach-Object { [string]$_.path })
+  $dirOf = { param($p) $p.Substring(0, $p.LastIndexOfAny([char[]]'/\')) }
+  [ordered]@{
+    platform = 'windows'; clash_api = [string]$clash.external_controller; clash_api_secret = $script:Secret
+    windows_panel_dir = if ($clash.external_ui) { [string]$clash.external_ui } else { "$Dir/panel" -replace '\\', '/' }
+    windows_rules_dir = if ($srs.Count) { & $dirOf $srs[0] } else { "$Dir/rules" -replace '\\', '/' }
+    listen = if ($main.listen) { [string]$main.listen } else { '127.0.0.1' }
+    main_port = if ($main.listen_port) { [int]$main.listen_port } else { 10808 }
+    traffic_port = $Port
+  }
+}
+
+function SaveProfile([string]$text) {
+  try { $o = ParseJson $text } catch { Bad '设置的格式不对' }
+  if (-not ($o -is [System.Collections.IDictionary])) { Bad '设置的格式不对' }
+  $new = -not (Test-Path $ProfileFile)
+  WriteText $ProfileFile $text
+  if ($new -and $IsWin) { & icacls $ProfileFile /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' | Out-Null }
+  [ordered]@{ ok = $true }
+}
+
+# 下载：返回 @{ status; userinfo; disposition; bytes }（响应关闭后就读不到响应头了，先取出来）。.NET Framework 默认不开 TLS 1.2，先打开
+function Download([string]$url, [string]$ua = 'neu-v6-free') {
+  $u = $null
+  if (-not [Uri]::TryCreate($url, 'Absolute', [ref]$u) -or ($u.Scheme -ne 'http' -and $u.Scheme -ne 'https')) { Bad '只支持 http / https 链接' }
+  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+  $r = [System.Net.HttpWebRequest]::Create($u)
+  $r.UserAgent = $ua; $r.Timeout = 30000; $r.ReadWriteTimeout = 30000; $r.AutomaticDecompression = 'GZip, Deflate'
+  try { $resp = $r.GetResponse() }
+  catch [System.Net.WebException] {
+    if ($_.Exception.Response) { Bad "服务器返回 $([int]$_.Exception.Response.StatusCode)（链接失效或过期？）" }
+    Bad "下载失败：$($_.Exception.Message)"
+  }
+  try {
+    $ms = New-Object System.IO.MemoryStream
+    $s = $resp.GetResponseStream(); $buf = New-Object byte[] 65536
+    while (($n = $s.Read($buf, 0, $buf.Length)) -gt 0) {
+      $ms.Write($buf, 0, $n)
+      if ($ms.Length -gt $MaxDownload) { Bad "内容太大（超过 $($MaxDownload / 1MB)MB）" }
+    }
+    return @{ status = [int]$resp.StatusCode; userinfo = $resp.Headers['subscription-userinfo']; disposition = $resp.Headers['Content-Disposition']; bytes = $ms.ToArray() }
+  } finally { $resp.Close() }
+}
+
+function FetchSubscription([string]$url) {
+  # 带 clash.meta 的 User-Agent：多数机场据此返回完整的 mihomo 配置
+  $d = Download $url 'clash.meta (neu-v6-free)'
+  [ordered]@{ status = $d.status; text = $utf8.GetString($d.bytes); userinfo = $d.userinfo; disposition = $d.disposition }
+}
+
+# 面板生成的配置：放进临时生成目录（和 cli.js 的输出一样的结构），缺的规则集按面板给的地址下载，再走 ApplyUpdate
+function ApplyInline($body) {
+  $cfgText = $body['config']; $panelText = $body['panel']
+  if (-not ($cfgText -is [string]) -or -not ($panelText -is [string])) { Bad '缺少 config 或 panel' }
+  try { $new = $cfgText | ConvertFrom-Json } catch { Bad "配置不是合法的 JSON（或超过 2MB）：$($_.Exception.Message)" }
+  CheckPaths $new
+  $urls = $body['rule_sets']
+  $stage = Join-Path $Dir ('.stage-' + [guid]::NewGuid().ToString('N'))
+  try {
+    $stageRules = Join-Path $stage 'rules'; $stagePanel = Join-Path $stage 'panel'
+    New-Item -ItemType Directory -Force -Path $stageRules, $stagePanel | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $stage 'config.json'), $cfgText, $utf8)
+    [System.IO.File]::WriteAllText((Join-Path $stagePanel 'groups.json'), $panelText, $utf8)
+    foreach ($rs in @($new.route.rule_set)) {
+      if (-not $rs -or $rs.type -ne 'local' -or $rs.format -ne 'binary' -or (Test-Path $rs.path)) { continue }
+      $name = Split-Path ([string]$rs.path) -Leaf
+      if ($name -notmatch '^[\w.!+-]+$') { Bad "规则集文件名不对：$name" }
+      $url = if ($urls -is [System.Collections.IDictionary]) { $urls[[string]$rs.tag] } else { $null }
+      if (-not ($url -is [string]) -or -not $url.StartsWith('https://')) { Bad "本机没有规则集 $($rs.tag)，也没有给下载地址" }
+      [System.IO.File]::WriteAllBytes((Join-Path $stageRules $name), (Download $url).bytes)
+    }
+    return ApplyUpdate $stage
+  } finally { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 # sing-box 停掉时面板（由 sing-box 提供）打不开，助手自己给一个最简单的状态页
 $StatusPage = @'
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -820,6 +929,16 @@ function Reply($ctx, [int]$code, $obj) {
   $res.Close()
 }
 
+function ReplyRaw($ctx, [int]$code, [string]$json) {
+  $res = $ctx.Response
+  $res.StatusCode = $code
+  $res.ContentType = 'application/json; charset=utf-8'
+  $bytes = $utf8.GetBytes($json)
+  $res.ContentLength64 = $bytes.Length
+  $res.OutputStream.Write($bytes, 0, $bytes.Length)
+  $res.Close()
+}
+
 function Handle($ctx) {
   $req = $ctx.Request
   $res = $ctx.Response
@@ -834,7 +953,7 @@ function Handle($ctx) {
   if ($method -eq 'OPTIONS') { $res.StatusCode = 204; $res.Close(); return }
   if ($path -eq '/health') {
     $running = [bool]($script:proc -and -not $script:proc.HasExited)
-    return Reply $ctx 200 ([ordered]@{ ok = $true; rules = [bool]$script:Targets.Count; traffic = [bool]$script:TrafficPs; apply = $true; singbox = $running; tun = ($running -and (TunUp)); safe_mode = $script:safe; server_fallback = (LoadFallback); server_checked = $script:guard.checked })
+    return Reply $ctx 200 ([ordered]@{ ok = $true; rules = [bool]$script:Targets.Count; traffic = [bool]$script:TrafficPs; apply = $true; client = $true; singbox = $running; tun = ($running -and (TunUp)); safe_mode = $script:safe; server_fallback = (LoadFallback); server_checked = $script:guard.checked })
   }
   if ($path -eq '/' -and $method -eq 'GET') {
     $bytes = $utf8.GetBytes($StatusPage)
@@ -855,10 +974,33 @@ function Handle($ctx) {
       return Reply $ctx 200 (Resume)
     } catch [System.ArgumentException] { return Reply $ctx 400 ([ordered]@{ error = $_.Exception.Message }) }
   }
+  if ($path -eq '/profile' -or $path -eq '/fetch' -or ($path -eq '/apply' -and $origin)) {
+    # 客户端功能（设置、订阅、安装面板生成的配置）：和 /rules 一样只认面板页面 + 密钥
+    if (-not $script:Secret -or ($origin -and $script:Origins -notcontains $origin) -or $req.Headers['Authorization'] -ne "Bearer $($script:Secret)") {
+      return Reply $ctx 401 ([ordered]@{ error = '密钥不对' })
+    }
+    try {
+      if ($path -eq '/profile' -and $method -eq 'GET') {
+        $p = if (Test-Path $ProfileFile) { [System.IO.File]::ReadAllText($ProfileFile, $utf8) } else { 'null' }
+        return ReplyRaw $ctx 200 ('{"profile":' + $p + ',"defaults":' + (ConvertTo-Json -InputObject (InstallDefaults) -Compress) + '}')
+      }
+      if ($req.ContentLength64 -gt $MaxBody) { Bad '内容太大' }
+      $text = (New-Object System.IO.StreamReader($req.InputStream, $utf8)).ReadToEnd()
+      if ($path -eq '/profile' -and $method -eq 'PUT') { return Reply $ctx 200 (SaveProfile $text) }
+      if ($method -ne 'POST') { return Reply $ctx 404 ([ordered]@{ error = 'not found' }) }
+      $body = ParseJson $text
+      if (-not ($body -is [System.Collections.IDictionary])) { Bad '请求格式不对' }
+      if ($path -eq '/fetch') { return Reply $ctx 200 (FetchSubscription ([string]$body['url'])) }
+      $result = ApplyInline $body
+      Reply $ctx 200 $result
+      if ($result.helper_updated) { Log '助手已升级，退出后几秒内由计划任务拉起新版'; $script:restartSelf = $true }
+    } catch [System.ArgumentException] { Reply $ctx 400 ([ordered]@{ error = $_.Exception.Message }) }
+    return
+  }
   if ($path -eq '/apply' -and $method -eq 'POST') {
-    # 只给本机脚本用：网页发来的一律拒绝；必须有密钥
-    if ($origin -or -not $script:Secret -or $req.Headers['Authorization'] -ne "Bearer $($script:Secret)") {
-      return Reply $ctx 401 ([ordered]@{ error = '密钥不对（或请求来自网页）' })
+    # 本机脚本（update.ps1）：交来生成目录的路径；必须有密钥
+    if (-not $script:Secret -or $req.Headers['Authorization'] -ne "Bearer $($script:Secret)") {
+      return Reply $ctx 401 ([ordered]@{ error = '密钥不对' })
     }
     $text = (New-Object System.IO.StreamReader($req.InputStream, $utf8)).ReadToEnd()
     try {

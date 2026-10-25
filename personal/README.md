@@ -38,7 +38,8 @@
 sudo ./uninstall.sh      # 卸载（保留我的规则和流量统计；加 --purge 全删），之后可以打开 FlClash / v2rayN
 ```
 
-切换线路、加规则都在面板里，不用运行脚本。通用版改动后想先看看配置差别：
+切换线路、加规则都在面板里，不用运行脚本。`update.sh` 会把 `profile.yaml` + `config.local.yaml` 同步到面板的「订阅与节点」「设置」里；
+在面板里改了订阅或设置再运行 `update.sh`，会被文件里的设置覆盖（以文件为准）。通用版改动后想先看看配置差别：
 
 ```bash
 node ../cli.js -c profile.yaml -c config.local.yaml -p mac -o /tmp/x

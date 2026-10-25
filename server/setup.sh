@@ -144,7 +144,7 @@ import json, os, sys
 s = json.load(open(sys.argv[1])); P = s["ports"]; v4, v6, label = os.environ["V4"], os.environ["V6"], os.environ["LABEL"]
 q = lambda x: json.dumps(x, ensure_ascii=False)
 lines = [
-  "# 粘贴到客户端 config.yaml（或网页生成器）。含密码，不要公开。",
+  "# 粘贴到客户端面板「订阅与节点」的手动添加框（命令行用户粘进 config.yaml）。含密码，不要公开。",
   "entry_servers:",
   f"  {q(v4)}: {{ v6: {q(v6)}, label: {q(label)} }}",
   "entry_default: vless   # 「免流服务器」默认用 Reality（TCP）；丢包多的线路可改 hysteria2",

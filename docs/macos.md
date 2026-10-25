@@ -4,16 +4,27 @@ macOS 上推荐装成**后台服务**：开机自动运行，带网页面板、�
 
 不想装后台服务也可以用 sing-box 官方 App，见文末。
 
-## 准备
+## 安装（安装包，推荐）
 
-1. **Node.js 18 以上**：`brew install node`，或从 [nodejs.org](https://nodejs.org/) 下载。
-2. **sing-box**（1.12 以上）：任选一个
-   - `brew install sing-box`
-   - 装过 v2rayN 的话，可以直接用它自带的（安装脚本会自动找到）
-   - 从 [sing-box 发布页](https://github.com/SagerNet/sing-box/releases) 下载 `darwin-arm64`（M 系列芯片）或 `darwin-amd64`（Intel）
-3. **退出其他代理软件**（ClashX、Clash Verge、FlClash、v2rayN、Surge……），包括它们的 TUN / 增强模式。端口 10808、9090、9091 不能被占用。
+1. **退出其他代理软件**（ClashX、Clash Verge、FlClash、v2rayN、Surge……），包括它们的 TUN / 增强模式。端口 10808、9090、9091 不能被占用。
+2. 到 [Releases](https://github.com/Concrise/neu-v6-free/releases) 下载 `neu-v6-free-<版本>-macos.zip`，双击解压。
+3. 右键「安装.command」→「打开」→ 输入开机密码。第一次必须右键打开：脚本没有经过苹果公证，直接双击会被拦下。
+   也可以在终端里运行 `sudo ./install.sh`（在解压出来的文件夹里）。
 
-## 安装
+安装脚本会：
+
+- 找 sing-box（1.12 以上）：PATH 里的（`brew install sing-box`）→ v2rayN 自带的 → 都没有就从 [sing-box 官方发布页](https://github.com/SagerNet/sing-box/releases) 下载；
+- 装到 `/usr/local/{libexec,etc,var}/neu-v6-free`，设成开机自启；
+- 生成随机的面板密钥（终端里会显示），自检能不能上网，不通自动撤回；
+- 通过后在浏览器里打开面板并自动登录。
+
+装好时是第一部分（v6 优先省流）。在面板「📦 订阅与节点」里加订阅或节点，有自己的服务器就把服务器脚本的输出粘进去（见 [server.md](server.md)），点「应用」。
+
+**升级**：下载新版安装包，再运行一次「安装.command」。只升级程序和面板，订阅、设置、我的规则都保留。
+
+## 安装（命令行生成，高级）
+
+想把设置写在文件里：需要 Node.js 18 以上（`brew install node`）。
 
 ```bash
 git clone https://github.com/Concrise/neu-v6-free.git
@@ -34,28 +45,29 @@ node cli.js -p mac        # 生成到 out/mac/，会顺便下载规则集
 sudo mac/install.sh       # 只有这一次要 sudo
 ```
 
-`install.sh` 会自动找 sing-box：先找 PATH 里的（`brew install` 装的），再找 v2rayN 自带的。想用别的，把路径作为第一个参数：
-`sudo mac/install.sh /path/to/sing-box`。
+`install.sh` 找 sing-box 的顺序同上。想用别的，把路径作为第一个参数：`sudo mac/install.sh /path/to/sing-box`。
 
-装好后浏览器打开 `http://127.0.0.1:9090/ui`，输入面板密钥。
+装好后浏览器打开 `http://127.0.0.1:9090/ui`，输入面板密钥。命令行生成的设置会同步到面板的「订阅与节点」「设置」里。
 
 ## 装了什么
 
 | 位置 | 内容 |
 |---|---|
 | `/usr/local/libexec/neu-v6-free/` | `sing-box`、本地助手 `helper.py` |
-| `/usr/local/etc/neu-v6-free/` | `config.json`（只有 root 能读）、`panel/`（面板）、`rules/`（规则集和「我的规则」） |
+| `/usr/local/etc/neu-v6-free/` | `config.json`、`profile.json`（面板里的订阅、节点、设置；都只有 root 能读）、`panel/`（面板）、`rules/`（规则集和「我的规则」） |
 | `/usr/local/var/neu-v6-free/` | sing-box 缓存（分组的选择存在这里）、日志、流量统计 `traffic.json` |
 | `/Library/LaunchDaemons/local.neu-v6-free.plist` | sing-box 服务：开机启动，崩溃自动拉起 |
 | `/Library/LaunchDaemons/local.neu-v6-free.helper.plist` | 本地助手服务 |
 
-**本地助手**是和 sing-box 一起装的一个小程序（`127.0.0.1:9091`），做 sing-box 自己做不到的三件事：
-面板里「我的规则」的增删改、流量统计、以及安装新配置并重启 sing-box（所以更新不用 `sudo`）。
+**本地助手**是和 sing-box 一起装的一个小程序（`127.0.0.1:9091`），做 sing-box 自己做不到的事：
+面板里「我的规则」的增删改、流量统计、保存订阅和设置、代面板下载订阅，以及安装新配置并重启 sing-box（所以改设置不用 `sudo`）。
 
 ## 日常使用
 
-- **切换线路、加规则**：都在面板里，立即生效，不用运行任何命令。见 [rules.md](rules.md)。
-- **改了订阅、服务器或 `config.yaml`**：
+- **切换线路、加规则、切代理模式**：都在面板里，立即生效，不用运行任何命令。见 [rules.md](rules.md)。
+- **加订阅、更新订阅、加节点、改服务器**：面板「订阅与节点」「设置」，改完点页面上方的「应用」。
+  面板在浏览器里生成新配置，交给本地助手检查、安装、重启 sing-box；不通会自动换回旧配置。
+- **命令行用户改了 `config.yaml`**：
 
   ```bash
   mac/update.sh

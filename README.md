@@ -33,10 +33,15 @@
 
 ## 功能
 
+- **一个完整的客户端**：下载安装包、双击安装，订阅、节点、服务器都在网页面板里管，不用装 Node、不用碰命令行。
+- **订阅与节点**：加机场订阅（Clash / mihomo、sing-box、v2rayN 格式都认），或粘贴节点链接（vless / vmess / trojan / ss / hy2 / tuic / anytls）。
+  每个订阅自成一组、自动选最快，都当「落地」用；显示剩余流量和到期时间，「剩余流量」这类假节点自动排除。
+- **代理模式**：规则 / 全局 / 直连，一键切换。
 - **网页面板**（`http://127.0.0.1:9090/ui`）：每个分组走哪条线路，下拉框一选立即生效、自动保存。
 - **我的规则**：面板里输入域名、网址、IP 或程序名，选去向，1–2 秒生效，不用重新生成配置。
 - **实时连接**：看每个连接是哪个程序发起的、为什么走这条路、免费还是计费；走得不对点「改规则」。
 - **流量统计**（macOS、Windows）：本月 v6 直连省了多少、经服务器免流省了多少、v4 计费用了多少。
+- **日志**：sing-box 的警告和错误实时显示，节点连不上、规则集出错一眼看到。
 - **只有第一次安装要管理员权限**：之后更新配置交给后台的本地助手，不用再输密码。
 - **断网保护**：装完、更新后、运行中都会检查，经 sing-box 上不了网就自动撤回或暂停，电脑回到普通网络。见下方[断网保护](#断网保护)。
 - **启动不依赖网络**：电脑上规则集随配置一起装，服务器不通时也能正常上网。
@@ -57,50 +62,61 @@
 
 ## 快速开始
 
-### 1. 生成配置
+### 1. 下载安装
 
-**命令行（推荐，电脑上装后台服务用这个）**：需要 [Node.js](https://nodejs.org/) 18 以上。
+到 [Releases](https://github.com/Concrise/neu-v6-free/releases) 下载对应系统的安装包并解压。安装前先退出其他代理软件（Clash、v2rayN、FlClash 等，托盘右键退出）。
+
+- **macOS**：右键「安装.command」→「打开」（第一次要这样绕过「来自身份不明的开发者」的提示），输入开机密码。
+  没装 sing-box 时会自动从官方下载。详见 [docs/macos.md](docs/macos.md)。
+- **Windows 10 / 11**：双击 `install.bat`，管理员确认点「是」。装到 `C:\neu-v6-free`。详见 [docs/windows.md](docs/windows.md)。
+
+只有这一次要管理员权限。装完会自检，不通自动撤回；通过后浏览器自动打开面板并登录（面板密钥是安装时随机生成的，终端里也会显示）。
+
+装好时是**第一部分**：有 IPv6 的国内网站已经在走 v6 免费了。
+
+### 2. 在面板里加订阅和服务器
+
+面板 `http://127.0.0.1:9090/ui`：
+
+1. **📦 订阅与节点**：粘贴机场订阅链接，或者粘贴节点链接。它们都是「落地」，在「国外网站」和 AI、YouTube 等分组里选用。
+2. **有自己的双栈服务器（第二部分）**：服务器上运行 [server/setup.sh](server/setup.sh)，把它最后输出的那一段原样粘进「订阅与节点」的手动添加框，
+   就会加好节点并设为免流服务器。也可以在「⚙️ 设置」→「免流服务器」里手动选节点、填 IPv6。
+3. 点页面上方的「**应用**」：生成新配置、检查、重启 sing-box；新配置上不了网会自动换回旧的。
+
+**Android / iOS**：装 sing-box 官方 App，导入生成的配置，见 [docs/mobile.md](docs/mobile.md)。
+
+### 3. 以后
+
+| 想做什么 | 怎么做 | 需要管理员？ |
+|---|---|---|
+| 换线路、换服务器 | 面板「分组与开关」，或订阅卡片上的下拉框 | 不需要，立即生效 |
+| 临时全部走代理 / 全部直连 | 面板「概览」→ 代理模式：规则 / 全局 / 直连 | 不需要，立即生效 |
+| 某个网站或 App 走得不对 | 面板「实时连接」→「改规则」，或「我的规则」里直接加 | 不需要，1–2 秒生效 |
+| 加订阅、更新订阅、加节点、改服务器 | 面板「订阅与节点」「设置」，改完点「应用」 | 不需要 |
+| 离开校园网（没有 IPv6） | 连不上服务器时自动改走「不用服务器」，能连上自动切回；也可以手动选 | 不需要 |
+| 上不了网 / 想临时关掉 | 会自动暂停；也可以面板「概览」→「暂停」，或打开 `http://127.0.0.1:9091/` | 不需要 |
+| 升级到新版本 | 下载新的安装包再装一次：只升级程序和面板，订阅、设置、我的规则都保留 | 要（同第一次） |
+
+调整规则的完整说明见 [docs/rules.md](docs/rules.md)。
+
+### 高级：用命令行生成
+
+想把设置写在文件里管理（或自己改生成器）：需要 [Node.js](https://nodejs.org/) 18 以上。
 
 ```bash
 git clone https://github.com/Concrise/neu-v6-free.git
 cd neu-v6-free
-cp config.example.yaml config.yaml   # 按注释填写；第一部分可以只填面板密钥
-node cli.js -p mac                   # 或 -p windows、-p android、-p ios、-p all
+cp config.example.yaml config.yaml   # 按注释填写
+node cli.js -p mac                   # 或 -p windows、-p android、-p ios、-p all；结果在 out/<平台>/
+sudo mac/install.sh                  # Windows：双击 out\windows\install.bat
 ```
 
-生成结果在 `out/<平台>/`。`config.yaml` 不会被 git 提交，里面的密码不会传上去。
+以后改了 `config.yaml`：重新生成，macOS 运行 `mac/update.sh`、Windows 双击新生成目录里的 `update.bat`（都不用管理员）。
+命令行生成的设置会同步到面板里；之后再用命令行更新，会用文件里的设置覆盖面板里改的。
+发布安装包：`node cli.js --package -o dist`。
 
-**网页生成器（不用装任何东西）**：打开 [web/index.html](web/)（本地打开要先在仓库目录运行 `python3 -m http.server 8765`，再访问 `http://127.0.0.1:8765/web/`），
-选模式、粘贴信息、选默认线路，下载各平台的配置。所有处理都在浏览器里完成，不上传任何内容。
-
-### 2. 安装
-
-**macOS**（详见 [docs/macos.md](docs/macos.md)）：先退出其他代理软件，然后
-
-```bash
-sudo mac/install.sh   # 只有这一次要 sudo；自动找 sing-box（brew install sing-box 或 v2rayN 自带的）
-```
-
-**Windows**（详见 [docs/windows.md](docs/windows.md)）：先退出 v2rayN、Clash 等代理软件（托盘右键退出），双击 `out\windows\install.bat`，
-弹出的管理员确认点「是」（只有这一次）。它会装到 `C:\neu-v6-free`、下载 sing-box、设成开机自启，并自检能不能上网。
-
-**Android / iOS**（详见 [docs/mobile.md](docs/mobile.md)）：装 sing-box 官方 App，新建配置 → 本地 → 选 `out/android/config.json` 或 `out/ios/config.json`。
-
-### 3. 打开面板
-
-浏览器访问 `http://127.0.0.1:9090/ui`，输入设置里的 `clash_api_secret`。
-
-### 4. 以后
-
-| 想做什么 | 怎么做 | 需要管理员？ |
-|---|---|---|
-| 换线路、换服务器 | 面板「分组与开关」 | 不需要，立即生效 |
-| 某个网站或 App 走得不对 | 面板「实时连接」→「改规则」，或「我的规则」里直接加 | 不需要，1–2 秒生效 |
-| 改了订阅、服务器或 `config.yaml` | 重新生成，然后 macOS 运行 `mac/update.sh`，Windows 双击新生成目录里的 `update.bat` | 不需要 |
-| 离开校园网（没有 IPv6） | 面板里「免流服务器」选「不用服务器（离校时选）」 | 不需要 |
-| 上不了网 / 想临时关掉 | 会自动暂停；也可以面板「概览」→「暂停」，或打开 `http://127.0.0.1:9091/` | 不需要 |
-
-调整规则的完整说明见 [docs/rules.md](docs/rules.md)。
+还有一个不用装任何东西的[网页生成器](web/)（本地打开要先在仓库目录运行 `python3 -m http.server 8765`，再访问 `http://127.0.0.1:8765/web/`），
+在浏览器里生成各平台的配置，不上传任何内容。
 
 ## 断网保护
 
@@ -119,7 +135,7 @@ sudo mac/install.sh   # 只有这一次要 sudo；自动找 sing-box（brew inst
 1. 准备一台有公网 IPv4 + IPv6 的 Debian / Ubuntu VPS。
 2. 把 [server/setup.sh](server/setup.sh) 传上去，以 root 运行 `bash setup.sh`：装好 sing-box，开 Reality / AnyTLS / Hysteria2 / TUIC 四个入站。
 3. 云平台安全组放行它提示的端口（IPv4 和 IPv6 都要）。
-4. 把它最后输出的那段原样粘贴进 `config.yaml`，重新生成并更新。
+4. 把它最后输出的那段原样粘进面板「订阅与节点」的手动添加框，点「应用」（命令行用户粘进 `config.yaml`，重新生成并更新）。
 
 详见 [docs/server.md](docs/server.md)。注意服务器的出站流量通常计费（例如 Azure 亚洲区每月前 100GB 免费），校园网下载的数据都会从服务器发出。
 
@@ -137,8 +153,9 @@ sudo mac/install.sh   # 只有这一次要 sudo；自动找 sing-box（brew inst
 
 ```
 cli.js              命令行生成器
-lib/                生成逻辑（命令行和网页生成器共用）：groups.js 是分组与规则定义，build.js 生成 sing-box 配置
-panel/              网页面板（单个 HTML 文件）
+lib/                生成逻辑（命令行、网页生成器、面板共用）：groups.js 是分组与规则定义，build.js 生成 sing-box 配置，
+                    subscription.js 解析订阅与节点链接，convert.js 把节点转成 sing-box 出站
+panel/              网页面板（单个 HTML 文件；安装时 lib/ 一起装进 panel/lib/，面板在浏览器里生成配置）
 mac/                macOS 安装 / 更新 / 卸载脚本，本地助手 helper.py
 windows/            Windows 安装 / 更新 / 卸载脚本，本地助手 helper.ps1
 server/setup.sh     第二部分的服务器一键部署脚本

@@ -20,8 +20,17 @@ print(c['experimental']['clash_api'].get('secret') or '-', g.get('traffic_port',
 BODY=$(/usr/bin/python3 -c "import json, sys; print(json.dumps({'src': sys.argv[1]}))" "$SRC")
 RESP=$(mktemp)
 trap 'rm -f "$RESP"' EXIT
-CODE=$(curl -s -m 180 -o "$RESP" -w '%{http_code}' -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' \
-  -d "$BODY" "http://127.0.0.1:$PORT/apply" || true)
+apply() {
+  curl -s -m 180 -o "$RESP" -w '%{http_code}' -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' \
+    -d "$BODY" "http://127.0.0.1:$PORT/apply" || true
+}
+CODE=$(apply)
+# 助手刚升级：旧版助手不认识新增的文件（如面板的 panel/lib），等新版起来再交一遍
+if [ "$CODE" = 200 ] && grep -q '"helper_updated": true' "$RESP"; then
+  echo "本地助手已升级，等它重启后再装一遍新增的文件……"
+  for _ in $(seq 1 30); do sleep 1; curl -s -m 2 "http://127.0.0.1:$PORT/health" | grep -q '"client": true' && break; done
+  CODE=$(apply)
+fi
 case "$CODE" in
   200)
     /usr/bin/python3 -c "
@@ -39,7 +48,10 @@ esac
 # 助手不在或太旧（没有 /apply）：用 sudo 装，同时把助手升级到新版，下次就不用 sudo 了
 echo "本地助手不可用（HTTP ${CODE:-无响应}），这次用 sudo 安装；装好新版助手后，以后更新不再需要 sudo。"
 sudo install -o root -g wheel -m 644 "$SRC"/rules/*.srs "$ETC_DIR/rules/"
-sudo install -o root -g wheel -m 644 "$SRC"/panel/* "$ETC_DIR/panel/"
+sudo install -o root -g wheel -m 644 "$SRC"/panel/index.html "$SRC"/panel/groups.json "$ETC_DIR/panel/"
+sudo install -d -o root -g wheel -m 755 "$ETC_DIR/panel/lib"
+sudo install -o root -g wheel -m 644 "$SRC"/panel/lib/* "$ETC_DIR/panel/lib/"
+sudo install -o root -g wheel -m 600 "$SRC/profile.json" "$ETC_DIR/profile.json"
 for f in "$SRC"/rules/user-*.json; do
   [ -e "$f" ] && [ ! -e "$ETC_DIR/rules/$(basename "$f")" ] && sudo install -o root -g wheel -m 644 "$f" "$ETC_DIR/rules/"
 done
