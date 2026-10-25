@@ -5,3 +5,6 @@ node_modules/
 .DS_Store
 __pycache__/
 dist/
+windows/app/app.ico
+windows/app/bin/
+windows/app/obj/

@@ -112,6 +112,8 @@ try {
   if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue }
   StopSingBox (Join-Path $dir 'sing-box.exe')
   RestoreWeakHost (Join-Path $dir 'weakhost.json')
+  # 开着的 App（窗口 + 托盘图标）先关掉，才能换它的文件；装完再打开
+  Get-Process neu-v6-free -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dir\app\*" } | Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 1
   # 别的代理软件占着端口时 sing-box 起不来
   $ports = @(@($cfg.inbounds) | Where-Object { $_.listen_port } | ForEach-Object { [int]$_.listen_port }) + [int]($cfg.experimental.clash_api.external_controller -split ':')[-1]
@@ -190,6 +192,11 @@ try {
     }
     # VERSION：本地助手检查更新用
     foreach ($f in 'helper.ps1', 'update.ps1', 'uninstall.ps1', 'uninstall.bat', 'VERSION') { if (Test-Path (Join-Path $src $f)) { Copy-Item (Join-Path $src $f) $dir -Force } }
+    # App：窗口里是面板，托盘里有状态图标（GitHub Actions 编译，见 windows/app）
+    if (Test-Path (Join-Path $src 'app\neu-v6-free.exe')) {
+      Remove-Item (Join-Path $dir 'app') -Recurse -Force -ErrorAction SilentlyContinue
+      Copy-Item (Join-Path $src 'app') $dir -Recurse -Force
+    }
     if (Test-Path (Join-Path $src 'rules')) {
       if (Test-Path (Join-Path $src 'rules\*.srs')) { Copy-Item (Join-Path $src 'rules\*.srs') $rulesDir -Force }
       foreach ($f in Get-ChildItem (Join-Path $src 'rules') -Filter 'user-*.json') {  # 「我的规则」只补缺的
@@ -208,8 +215,15 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "sing-box 检查配置没通过：$($out.Trim())" }
   $cfgDest = Join-Path $dir 'config.json'
   if (-not $same -and $cfgPath -ne $cfgDest) { Copy-Item $cfgPath $cfgDest -Force }
-  # config.json 里有节点密码和面板密钥：只给管理员、SYSTEM 和当前用户读
-  & icacls $cfgDest /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' "$($env:USERDOMAIN)\$($env:USERNAME):R" | Out-Null
+  # 安装目录：普通用户只能读和运行（App 在 app 里）。1.1.0 及以前没设，目录继承了 C:\ 的「已验证的用户：修改」，
+  # 普通账户就能改以 SYSTEM 运行的 helper.ps1、sing-box.exe。先收紧目录，再让里面的文件都改回继承它
+  & icacls $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+  & icacls "$dir\*" /reset /T /C /Q | Out-Null
+  # 有节点密码和面板密钥的文件只给管理员和 SYSTEM（App 读的 panel-secret 由本地助手再允许登录的用户读）
+  foreach ($f in 'config.json', 'config.json.prev', 'config.json.new', 'profile.json', 'panel-secret') {
+    $t = Join-Path $dir $f
+    if (Test-Path $t) { & icacls $t /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' | Out-Null }
+  }
 
   # 本地助手：开机以 SYSTEM 运行，退出后一分钟自动重启；由它启动并看着 sing-box
   $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -268,7 +282,19 @@ try {
   Write-Host '万一以后上不了网：本地助手会自动暂停 sing-box；也可以打开 http://127.0.0.1:9091/ 手动暂停或重新启用。' 
   Write-Host ''
   Write-Host '面板：http://127.0.0.1:9090/ui' -ForegroundColor Cyan
-  if ($secret) {
+  $app = Join-Path $dir 'app\neu-v6-free.exe'
+  if (Test-Path $app) {
+    # 开始菜单和桌面的入口（所有用户）；以前的版本在开始菜单放的是打开网页的 .url
+    $sh = New-Object -ComObject WScript.Shell
+    foreach ($l in (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\校园网 v6 免流.lnk'), (Join-Path $env:PUBLIC 'Desktop\校园网 v6 免流.lnk')) {
+      $k = $sh.CreateShortcut($l); $k.TargetPath = $app; $k.WorkingDirectory = Split-Path $app; $k.Description = '校园网 v6 免流：面板和运行状态'; $k.Save()
+    }
+    Remove-Item (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\校园网 v6 免流.url') -Force -ErrorAction SilentlyContinue
+    # App 自己读密钥（本地助手写的 panel-secret）登录面板。经 explorer 打开，App 不会以管理员身份运行
+    if ($secret) { Write-Host "面板密钥：$secret（App 会自动登录；用浏览器打开面板时要用）" -ForegroundColor Cyan }
+    Start-Process explorer.exe $app -ErrorAction SilentlyContinue
+    Write-Host '以后从开始菜单、桌面的「校园网 v6 免流」或右下角托盘的 v6 图标打开；关掉窗口、退出 App 都不影响免流。'
+  } elseif ($secret) {
     # 第一次装：密钥放在网址的 # 后面（不会发给任何服务器），面板读到后自动登录。经 explorer 打开，浏览器不会以管理员身份运行
     Write-Host "面板密钥：$secret（已经帮你在浏览器里登录；换浏览器时要用）" -ForegroundColor Cyan
     Start-Process explorer.exe "http://127.0.0.1:9090/ui/#secret=$secret" -ErrorAction SilentlyContinue

@@ -26,16 +26,14 @@ BrandingText "neu-v6-free ${VERSION}"
 安装前请先退出其他代理软件（Clash Verge、FlClash、v2rayN……，托盘图标右键退出），包括它们的 TUN 模式。$\r$\n$\r$\n\
 • 装到 C:\neu-v6-free，开机自动运行，自带 sing-box 内核。$\r$\n\
 • 装完会自检能不能上网，不通就自动撤回，电脑恢复原样。$\r$\n\
-• 通过后浏览器会自动打开面板并登录；以后从开始菜单「${APPNAME}」打开。$\r$\n\
+• 通过后自动打开「${APPNAME}」：窗口里是面板，右下角托盘有 v6 图标。$\r$\n\
 • 以后的新版本在面板「设置」里一键更新。"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TITLE "装好了"
-!define MUI_FINISHPAGE_TEXT "浏览器里应该已经打开了面板（http://127.0.0.1:9090/ui）。$\r$\n$\r$\n\
+!define MUI_FINISHPAGE_TEXT "「${APPNAME}」应该已经打开了（窗口里是面板），右下角托盘里有 v6 图标；以后从开始菜单或桌面打开。$\r$\n$\r$\n\
 现在已经在省流：有 IPv6 的国内网站走 v6 免费。有机场订阅或自己的服务器，到面板「订阅与节点」里加，改完点「应用」。$\r$\n$\r$\n\
-万一上不了网：会自动暂停；也可以打开 http://127.0.0.1:9091/ 手动暂停。卸载：设置 → 应用 →「${APPNAME}」。"
-!define MUI_FINISHPAGE_LINK "打开面板"
-!define MUI_FINISHPAGE_LINK_LOCATION "http://127.0.0.1:9090/ui/"
+万一上不了网：会自动暂停；也可以在托盘图标的菜单里暂停。关掉窗口、退出 App 都不影响免流。卸载：设置 → 应用 →「${APPNAME}」。"
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -80,11 +78,10 @@ Section "Install"
   WriteRegStr HKLM "${REGKEY}" "URLInfoAbout" "https://github.com/Concrise/neu-v6-free"
   WriteRegStr HKLM "${REGKEY}" "InstallLocation" "${TARGET}"
   WriteRegStr HKLM "${REGKEY}" "UninstallString" '"${TARGET}\${UNINSTALLER}"'
+  WriteRegStr HKLM "${REGKEY}" "DisplayIcon" "${TARGET}\app\neu-v6-free.exe"
   WriteRegDWORD HKLM "${REGKEY}" "NoModify" 1
   WriteRegDWORD HKLM "${REGKEY}" "NoRepair" 1
-  ; 开始菜单入口：打开面板
-  SetShellVarContext all
-  WriteINIStr "$SMPROGRAMS\${APPNAME}.url" "InternetShortcut" "URL" "http://127.0.0.1:9090/ui/"
+  ; 开始菜单、桌面的入口由 install.ps1 建（指向 C:\neu-v6-free\app\neu-v6-free.exe），zip 手动安装时也有
 SectionEnd
 
 Section "Uninstall"
@@ -97,7 +94,7 @@ Section "Uninstall"
   Pop $0
   DeleteRegKey HKLM "${REGKEY}"
   SetShellVarContext all
-  Delete "$SMPROGRAMS\${APPNAME}.url"
+  Delete "$SMPROGRAMS\${APPNAME}.url"  ; 1.1.0 及以前的开始菜单入口；新的 .lnk 由 uninstall.ps1 删
   Delete "${TARGET}\${UNINSTALLER}"
   RMDir "${TARGET}"  ; 空了才删（保留了订阅和规则时目录还在）
 SectionEnd

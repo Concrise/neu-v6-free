@@ -117,6 +117,17 @@ sleep 3
 launchctl print system/$LABEL | grep -E "state|pid" | head -3
 NAME=$NAME LABEL=$LABEL "$(dirname "$0")/helper-service.sh"
 
+# App（窗口里是面板 + 菜单栏图标）：安装包里有就装到「应用程序」，开着的旧版先关掉
+APP="校园网 v6 免流.app"
+if [ -d "$HERE/$APP" ]; then
+  pkill -f "/Applications/$APP/Contents/MacOS/" 2>/dev/null || true
+  rm -rf "/Applications/$APP"
+  ditto "$HERE/$APP" "/Applications/$APP"
+  chown -R root:wheel "/Applications/$APP"
+else
+  APP=
+fi
+
 # 断网保护：装完确认经 sing-box 能上网；不通而绕过它能通（是 sing-box 的问题），就撤回，电脑回到原来的网络
 probe() { [ "$(curl -skI -o /dev/null -m 6 --noproxy '*' -w '%{http_code}' "$@")" != 000 ]; }
 net_ok() { for u in https://www.taobao.com https://www.baidu.com https://www.qq.com; do probe "$u" && return 0; done; return 1; }
@@ -150,11 +161,17 @@ else
 fi
 tail -5 "$VAR_DIR/sing-box.log" 2>/dev/null || true
 echo "已安装。面板 http://127.0.0.1:9090/ui"
-if [ -n "$STARTER" ] && [ -n "${SECRET:-}" ]; then
+as_user() { [ -n "${SUDO_USER:-}" ] && launchctl asuser "$(id -u "$SUDO_USER")" sudo -u "$SUDO_USER" "$@" 2>/dev/null || true; }
+if [ -n "$APP" ]; then
+  # App 自己读密钥（本地助手写的 $ETC_DIR/panel-secret）登录面板。在登录用户的桌面会话里打开（.pkg 里是 root 运行的）
+  [ -n "$STARTER" ] && [ -n "${SECRET:-}" ] && echo "面板密钥：$SECRET（App 会自动登录；用浏览器打开面板时要用）"
+  as_user open "/Applications/$APP"
+  echo "以后从「应用程序」或菜单栏的 v6 图标打开。"
+elif [ -n "$STARTER" ] && [ -n "${SECRET:-}" ]; then
   # 第一次装：密钥放在网址的 # 后面（不会发给任何服务器），面板读到后自动登录
   echo "面板密钥：$SECRET（已经帮你在浏览器里登录；换浏览器时要用）"
   # 在登录用户的桌面会话里打开（安装器 .pkg 里是 root 运行的，直接 open 打不开浏览器）
-  [ -n "${SUDO_USER:-}" ] && launchctl asuser "$(id -u "$SUDO_USER")" sudo -u "$SUDO_USER" open "http://127.0.0.1:9090/ui/#secret=$SECRET" 2>/dev/null || true
+  as_user open "http://127.0.0.1:9090/ui/#secret=$SECRET"
 fi
 echo "以后订阅、节点、设置都在面板里改（「订阅与节点」「设置」），新版本在面板「设置」里一键更新，不用再运行脚本。"
 echo "卸载：sudo $BIN_DIR/uninstall.sh"

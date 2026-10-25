@@ -55,6 +55,24 @@ rules_lock = threading.Lock()
 apply_lock = threading.Lock()
 
 
+def publish_secret():
+    """把面板密钥另存一份给 App 读（root:admin 640：管理员账户能读，和它们能 sudo 看配置一样）。
+    App 用它自动登录面板、在菜单栏暂停 / 重新启用。config.json 本身仍然只有 root 能读。"""
+    if os.geteuid() != 0:
+        return
+    f = os.path.join(ETC_DIR, "panel-secret")
+    if not SECRET:
+        if os.path.exists(f):
+            os.unlink(f)
+        return
+    tmp = f + ".tmp"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
+        fh.write(SECRET + "\n")
+    os.chown(tmp, 0, 80)  # 80 = admin 组
+    os.chmod(tmp, 0o640)
+    os.replace(tmp, f)
+
+
 def reload():
     """读配置：Clash API 地址与密钥、出口（流量统计用）、「我的规则」的目标。/apply 装了新配置后再调一次。"""
     global cfg, API, SECRET, PANEL_ORIGINS, OUT, ENTRY_MEMBERS, TARGETS, RULES_DIR, RULES_FILE
@@ -62,6 +80,7 @@ def reload():
     clash = cfg["experimental"]["clash_api"]
     API = "http://" + clash["external_controller"]
     SECRET = clash.get("secret", "")
+    publish_secret()
     PANEL_ORIGINS = {API, API.replace("127.0.0.1", "localhost")}
     OUT = {o["tag"]: o for o in cfg["outbounds"]}
     ENTRY_MEMBERS = {t for t in OUT.get(ENTRY, {}).get("outbounds", []) if OUT.get(t, {}).get("type") not in GROUP_TYPES | {"direct"}}
@@ -674,7 +693,7 @@ def apply_update(src):
             os.unlink(staged)
             raise BadConfig("sing-box 检查没通过，旧配置没动：" + (r.stderr or r.stdout).strip()[-800:])
         backup = CONFIG + ".prev"
-        shutil.copyfile(CONFIG, backup)
+        install_file(CONFIG, backup, 0o600)  # 有密钥和节点密码，和 config.json 一样只给 root
         os.replace(staged, CONFIG)
         restarted = bool(args.label)
         if restarted:
@@ -889,6 +908,7 @@ def install_update():
                 if os.path.isfile(os.path.join(pkg, name)):
                     install_file(os.path.join(pkg, name), os.path.join(BIN_DIR, name), 0o755)
             install_file(new_helper, os.path.join(BIN_DIR, "helper.py"), 0o755)
+            install_app(pkg)
             install_file(os.path.join(pkg, "VERSION"), VERSION_FILE)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -896,6 +916,31 @@ def install_update():
     if restart:
         threading.Timer(1.0, stop).start()  # 退出后 launchd 拉起新版助手
     return {"ok": True, "from": old, "to": current_version(), "helper_restart": restart}
+
+
+APP_NAME = "校园网 v6 免流.app"
+
+
+def install_app(pkg):
+    """安装包里带了 App 就换掉 /Applications 里的（开着的 App 发现自己的版本变了会重新打开）"""
+    src = os.path.join(pkg, APP_NAME)
+    if not os.path.isdir(src):
+        return
+    dest = os.path.join("/Applications", APP_NAME)
+    tmp = os.path.join("/Applications", ".neu-v6-free-app.new")
+    shutil.rmtree(tmp, ignore_errors=True)
+    subprocess.run(["ditto", src, tmp], check=True, timeout=120)
+    subprocess.run(["chown", "-R", "root:wheel", tmp], check=True, timeout=60)
+    for f in glob.glob(os.path.join(tmp, "Contents", "MacOS", "*")):
+        os.chmod(f, 0o755)  # zipfile 解压不保留可执行权限
+    old = None
+    if os.path.exists(dest):
+        old = os.path.join("/Applications", ".neu-v6-free-app.old")
+        shutil.rmtree(old, ignore_errors=True)
+        os.rename(dest, old)
+    os.rename(tmp, dest)
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
 
 
 def update_checker():
@@ -1079,6 +1124,8 @@ def stop(*_):
 signal.signal(signal.SIGTERM, stop)
 signal.signal(signal.SIGINT, stop)
 os.makedirs(args.dir, exist_ok=True)
+if os.path.exists(CONFIG + ".prev"):
+    os.chmod(CONFIG + ".prev", 0o600)  # 旧版留下的备份是 644
 if TARGETS:
     with rules_lock:
         apply_rules(load_rules())  # 启动时按 user-rules.json 重写一遍规则文件（升级后新增的目标也会有文件）

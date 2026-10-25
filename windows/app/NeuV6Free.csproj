@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 「校园网 v6 免流」的 Windows 外壳（Program.cs）。.NET Framework 4.8 是 Windows 10 / 11 自带的，不用另装运行库；
+       面板用 WebView2 显示（Windows 11 自带，Windows 10 随 Edge 装好）。在 GitHub Actions 上编译：
+       .github/workflows/windows-app.yml，产物是一个目录（exe + WebView2 的几个 dll），装到 C:\neu-v6-free\app -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>neu-v6-free</AssemblyName>
+    <RootNamespace>NeuV6Free</RootNamespace>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.0.0</Version> <!-- 编译时用 -p:Version= 传入 package.json 的版本号 -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Product>校园网 v6 免流</Product>
+    <Company>Concrise</Company>
+    <Copyright>MIT · https://github.com/Concrise/neu-v6-free</Copyright>
+    <DebugType>none</DebugType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions> <!-- 不要 WebView2 的 .xml 文档 -->
+    <SatelliteResourceLanguages>none</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Web.Extensions" /> <!-- JavaScriptSerializer：读助手的 JSON -->
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

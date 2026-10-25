@@ -28,6 +28,13 @@ foreach ($p in @(Get-Process -Name 'sing-box' -ErrorAction SilentlyContinue | Wh
   if (Test-Path "$dir\helper.ps1") { Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$dir\helper.ps1`" -SendCtrlC $($p.Id)" -WindowStyle Hidden -Wait }
   if (-not $p.WaitForExit(10000)) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
 }
+# App（窗口 + 托盘图标）：关掉，删开始菜单和桌面的入口、当前用户的开机自动打开
+Get-Process neu-v6-free -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dir\app\*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+foreach ($l in (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\校园网 v6 免流.lnk'), (Join-Path $env:PUBLIC 'Desktop\校园网 v6 免流.lnk'), (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\校园网 v6 免流.url')) {
+  Remove-Item $l -Force -ErrorAction SilentlyContinue
+}
+Remove-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'neu-v6-free' -ErrorAction SilentlyContinue
+Remove-Item 'HKCU:\Software\neu-v6-free' -Recurse -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
 # 本地助手暂时关掉的 WeakHostSend 恢复原值（见 helper.ps1 的 FixWeakHost）
 $wh = Join-Path $dir 'weakhost.json'
@@ -39,7 +46,7 @@ if (Test-Path $wh) {
   }
   Write-Host '网卡的 WeakHostSend 已恢复成安装前的设置'
 }
-foreach ($p in 'config.json', 'config.json.prev', 'config.json.new', 'panel', 'data', 'sing-box.exe', 'helper.ps1', 'update.ps1', 'helper.log', 'sing-box.log', 'sing-box.prev.log', 'sing-box.out.log', 'safe-mode.json', 'server-fallback.json', 'weakhost.json') {
+foreach ($p in 'config.json', 'config.json.prev', 'config.json.new', 'panel-secret', 'app', 'panel', 'data', 'sing-box.exe', 'helper.ps1', 'update.ps1', 'helper.log', 'sing-box.log', 'sing-box.prev.log', 'sing-box.out.log', 'safe-mode.json', 'server-fallback.json', 'weakhost.json') {
   $t = Join-Path $dir $p
   if (Test-Path $t) { Remove-Item $t -Recurse -Force }
 }

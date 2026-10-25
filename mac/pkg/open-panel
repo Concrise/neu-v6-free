@@ -1,7 +1,0 @@
-#!/bin/bash
-# 「应用程序」里「校园网 v6 免流」的入口：打开面板；sing-box 暂停着（面板打不开）就打开本地助手的状态页
-if curl -s -o /dev/null -m 2 --noproxy '*' http://127.0.0.1:9090/; then
-  open "http://127.0.0.1:9090/ui/"
-else
-  open "http://127.0.0.1:9091/"
-fi

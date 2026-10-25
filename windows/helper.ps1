@@ -238,6 +238,37 @@ $DirectProbes6 = @('http://[2400:3200::1]/', 'http://[2402:4e00::]/')
 $DirectProbes4 = @('http://220.181.111.1/', 'http://110.242.68.66/')
 $SafeFile = Join-Path $Dir 'safe-mode.json'
 $IsWin = $env:OS -eq 'Windows_NT'
+
+# ---------- 权限 ----------
+# 安装目录普通用户只能读和运行（install.ps1 设的，新建的文件默认继承）；有密钥的文件
+# （config.json 及其备份、profile.json）要单独收紧成只给管理员和 SYSTEM
+function Protect([string]$path) {
+  if ($IsWin -and (Test-Path $path)) { & icacls $path /inheritance:r /grant:r '*S-1-5-32-544:F' '*S-1-5-18:F' | Out-Null }
+}
+# App（app\neu-v6-free.exe）读 panel-secret 自动登录面板、在托盘菜单里暂停 / 重新启用。它以普通权限运行，
+# 读不了只给管理员组的文件，所以除了管理员和 SYSTEM，再允许登录到这台电脑桌面的用户读（每分钟看一次换没换人）
+$SecretFile = Join-Path $Dir 'panel-secret'
+$script:secretUsers = @{}
+$script:nextGrant = Get-Date
+function PublishSecret() {
+  if (-not $IsWin) { return }
+  if (-not $script:Secret) { Remove-Item $SecretFile -Force -ErrorAction SilentlyContinue; return }
+  if (-not (Test-Path $SecretFile)) {
+    [IO.File]::WriteAllText($SecretFile, '', $utf8)  # 先建空文件收紧权限，再写内容
+    Protect $SecretFile
+    $script:secretUsers = @{}
+  }
+  [IO.File]::WriteAllText($SecretFile, $script:Secret + "`n", $utf8)  # 覆盖已有文件不改它的权限
+  GrantSecret
+}
+function GrantSecret() {
+  $script:nextGrant = (Get-Date).AddMinutes(1)
+  if (-not $IsWin -or -not (Test-Path $SecretFile)) { return }
+  try { $u = [string](Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName } catch { return }
+  if (-not $u -or $script:secretUsers[$u]) { return }
+  & icacls $SecretFile /grant "${u}:R" | Out-Null
+  if ($LASTEXITCODE -eq 0) { $script:secretUsers[$u] = $true; Log "允许 $u 读面板密钥（App 自动登录用）" }
+}
 $Curl = if ($IsWin) { 'curl.exe' } else { 'curl' }  # 非 Windows 只用于开发测试
 $NullDev = if ($IsWin) { 'NUL' } else { '/dev/null' }
 $script:safe = $null
@@ -775,11 +806,14 @@ function ApplyUpdate($src) {
   }
   $staged = "$Config.new"
   Copy-Item $cfgFile $staged -Force
+  Protect $staged
   $out = & $SingBox check --disable-color -c $staged 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) { Remove-Item $staged -Force; Bad "sing-box 检查没通过，旧配置没动：$($out.Trim())" }
   Copy-Item $Config "$Config.prev" -Force
+  Protect "$Config.prev"
   Move-Item $staged $Config -Force
   LoadConfig
+  PublishSecret
   ApplyRules (LoadRules)
   if ($script:safe) { LeaveSafeMode } else { StartSingBox }  # 更新配置 = 重新启用
   if ((CheckAfterStart) -eq 'broken') {
@@ -970,6 +1004,7 @@ function InstallUpdate() {
     New-Item -ItemType Directory -Force -Path $lib | Out-Null
     foreach ($f in Get-ChildItem (Join-Path (Join-Path $p 'panel') 'lib') -File) { Copy-Item $f.FullName (Join-Path $lib $f.Name) -Force }
     foreach ($f in Get-ChildItem (Join-Path $p 'rules') -Filter '*.srs' -ErrorAction SilentlyContinue) { Copy-Item $f.FullName (Join-Path $script:RulesDir $f.Name) -Force }
+    InstallApp $p
     foreach ($n in 'update.ps1', 'uninstall.ps1', 'uninstall.bat', 'VERSION') {
       if (Test-Path (Join-Path $p $n)) { Copy-Item (Join-Path $p $n) (Join-Path $Dir $n) -Force }
     }
@@ -981,6 +1016,24 @@ function InstallUpdate() {
   # 安装程序在「设置 → 应用」里登记的版本号也跟着改
   if ($IsWin) { Set-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\neu-v6-free' -Name DisplayVersion -Value (CurrentVersion) -ErrorAction SilentlyContinue }
   [ordered]@{ ok = $true; from = $old; to = (CurrentVersion); helper_restart = $restart }
+}
+
+# Windows 外壳（app\neu-v6-free.exe 和 WebView2 的几个 dll）。开着的程序文件不能覆盖、但能改名：
+# 旧文件先改名成 *.old 再放新的，exe 最后放；开着的 App 发现自己的版本变了会重新打开，*.old 之后再删
+function InstallApp([string]$p) {
+  $src = Join-Path $p 'app'
+  if (-not (Test-Path (Join-Path $src 'neu-v6-free.exe'))) { return }
+  $dest = Join-Path $Dir 'app'
+  foreach ($f in (Get-ChildItem $src -Recurse -File | Sort-Object { $_.Name -eq 'neu-v6-free.exe' })) {
+    $t = Join-Path $dest $f.FullName.Substring($src.Length + 1)
+    New-Item -ItemType Directory -Force -Path (Split-Path $t) | Out-Null
+    if (Test-Path $t) { [IO.File]::Move($t, "$t.$([guid]::NewGuid().ToString('N').Substring(0, 8)).old") }
+    Copy-Item $f.FullName $t -Force
+  }
+  CleanOldApp
+}
+function CleanOldApp() {
+  Get-ChildItem (Join-Path $Dir 'app') -Recurse -Filter '*.old' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
 # sing-box 停掉时面板（由 sing-box 提供）打不开，助手自己给一个最简单的状态页
@@ -1136,6 +1189,10 @@ function Handle($ctx) {
   }
 }
 
+# 旧版留下的备份没收紧权限；App 用的密钥文件；上次更新换下来的 App 文件
+foreach ($f in "$Config.prev", "$Config.new") { Protect $f }
+PublishSecret
+CleanOldApp
 # 启动时按 user-rules.json 重写一遍规则文件（升级后新增的目标也会有文件），然后启动 sing-box
 ApplyRules (LoadRules)
 $script:safe = LoadSafeMode
@@ -1152,6 +1209,7 @@ while ($listener.IsListening -and -not $script:restartSelf) {
   while (-not $wait.AsyncWaitHandle.WaitOne(1000)) {
     Supervise
     if ((Get-Date) -ge $script:nextUpdateCheck) { [void](CheckUpdate) }  # 每天查一次新版本
+    if ((Get-Date) -ge $script:nextGrant) { GrantSecret }  # 换了登录用户时让新用户的 App 也能读密钥
   }
   $ctx = $listener.EndGetContext($wait)
   try { Handle $ctx }

@@ -178,6 +178,90 @@ function addSum(out, file) {
   fs.writeFileSync(sums, [...lines, `${hash}  ${file}`].join("\n") + "\n");
 }
 
+const APP_NAME = "校园网 v6 免流.app";
+
+/**
+ * Mac 的 App（mac/app/main.swift：窗口里是面板 + 菜单栏图标）。arm64 和 x86_64 各编一次合成通用二进制，
+ * 图标由 make-icon.swift 现画。放进安装包目录：install.sh 和一键更新都从这里装到 /Applications。
+ * 没有 swiftc（xcode-select --install）就跳过，安装后改用浏览器打开面板。
+ */
+function macApp(dir, out) {
+  try { execFileSync("swiftc", ["--version"], { stdio: "ignore" }); } catch {
+    console.error("提示：没有 swiftc（xcode-select --install），安装包里不带 App，装完用浏览器打开面板");
+    return;
+  }
+  const work = tmpDir(out, ".mac-app");
+  const app = path.join(dir, APP_NAME, "Contents");
+  fs.mkdirSync(path.join(app, "MacOS"), { recursive: true });
+  fs.mkdirSync(path.join(app, "Resources"), { recursive: true });
+  const src = path.join(ROOT, "mac/app/main.swift");
+  const bins = ["arm64", "x86_64"].map((arch) => {
+    const o = path.join(work, arch);
+    // 新版命令行工具编 x86_64 时会警告缺兼容库（macOS 13 起用不到），只在失败时显示输出
+    try { execFileSync("swiftc", ["-O", "-target", `${arch}-apple-macos13`, src, "-o", o], { stdio: "pipe" }); } catch (e) {
+      process.stderr.write(e.stderr || "");
+      throw e;
+    }
+    return o;
+  });
+  execFileSync("lipo", ["-create", ...bins, "-output", path.join(app, "MacOS/neu-v6-free")]);
+  execFileSync("swift", [path.join(ROOT, "mac/app/make-icon.swift"), path.join(work, "AppIcon.iconset")]);
+  execFileSync("iconutil", ["-c", "icns", path.join(work, "AppIcon.iconset"), "-o", path.join(app, "Resources/AppIcon.icns")]);
+  fs.writeFileSync(path.join(app, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>校园网 v6 免流</string>
+  <key>CFBundleDisplayName</key><string>校园网 v6 免流</string>
+  <key>CFBundleIdentifier</key><string>io.github.concrise.neu-v6-free.app</string>
+  <key>CFBundleExecutable</key><string>neu-v6-free</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>${VERSION}</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>MIT · https://github.com/Concrise/neu-v6-free</string>
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict></plist>
+`);
+  execFileSync("xattr", ["-cr", path.join(dir, APP_NAME)]);
+  execFileSync("codesign", ["--force", "--sign", "-", path.join(dir, APP_NAME)], { stdio: "pipe" });  // 自签（ad-hoc），Apple 芯片要求至少有签名
+  fs.rmSync(work, { recursive: true, force: true });
+}
+
+/**
+ * Windows 的 App（windows/app：窗口 + 托盘图标）在 GitHub Actions 上编译（.github/workflows/windows-app.yml）。
+ * 打包时按当前提交下载那次编译的产物（要装 gh 并登录），放进安装包的 app 目录；也可以用环境变量 NEU_WINDOWS_APP
+ * 指定已经编好的目录。拿不到就跳过，安装后改用浏览器打开面板。
+ */
+function winApp(dir, out) {
+  let src = process.env.NEU_WINDOWS_APP;
+  if (!src) {
+    const git = (...a) => execFileSync("git", a, { cwd: ROOT, encoding: "utf8" }).trim();
+    let sha;
+    try { sha = git("rev-parse", "HEAD"); } catch { return console.error("提示：不是 git 仓库，安装包里不带 Windows App"); }
+    if (git("status", "--porcelain", "--", "windows/app", "package.json")) {
+      console.error("提示：windows/app 或 package.json 有没提交的改动；安装包里的 Windows App 是按当前提交编译的");
+    }
+    src = path.join(out, ".cache", `windows-app-${sha.slice(0, 12)}`);
+    if (!fs.existsSync(path.join(src, "neu-v6-free.exe"))) {
+      const gh = (...a) => execFileSync("gh", ["-R", "Concrise/neu-v6-free", ...a], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      let run;
+      try {
+        run = JSON.parse(gh("run", "list", "--workflow", "windows-app.yml", "--commit", sha, "--status", "success", "--limit", "1", "--json", "databaseId"))[0];
+      } catch (e) {
+        return console.error(`提示：查不到 GitHub Actions 的编译结果（${String(e.stderr || e.message).trim()}），安装包里不带 Windows App`);
+      }
+      if (!run) return console.error(`提示：GitHub Actions 上还没有提交 ${sha.slice(0, 7)} 的 Windows App（先推送，等「Windows App」跑完），安装包里不带 Windows App`);
+      fs.rmSync(src, { recursive: true, force: true });
+      gh("run", "download", String(run.databaseId), "-n", "neu-v6-free-windows-app", "-D", src);
+    }
+  }
+  fs.cpSync(src, path.join(dir, "app"), { recursive: true });
+  console.log(`Windows App：${src}`);
+}
+
 const tmpDir = (out, name) => { const d = path.join(out, name); fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }); return d; };
 
 /**
@@ -187,6 +271,7 @@ const tmpDir = (out, name) => { const d = path.join(out, name); fs.rmSync(d, { r
  */
 async function packageExtras(platform, dir, out) {
   if (platform === "android" || platform === "ios") return;
+  if (platform === "windows") winApp(dir, out);
   if (platform === "mac") {
     for (const f of ["install.sh", "uninstall.sh", "helper-service.sh"]) {
       fs.copyFileSync(path.join(ROOT, "mac", f), path.join(dir, f));
@@ -195,6 +280,7 @@ async function packageExtras(platform, dir, out) {
     const cmd = (script, what) => `#!/bin/bash\n# 双击运行：${what}（会要求输入开机密码）\ncd "$(dirname "$0")" && sudo ./${script}\necho; read -n 1 -s -r -p "按任意键关闭"\n`;
     fs.writeFileSync(path.join(dir, "安装.command"), cmd("install.sh", "安装或升级"), { mode: 0o755 });
     fs.writeFileSync(path.join(dir, "卸载.command"), cmd("uninstall.sh", "卸载（保留订阅、设置和我的规则）"), { mode: 0o755 });
+    macApp(dir, out);
   }
   const base = `neu-v6-free-${VERSION}-${platform === "mac" ? "macos" : platform}`;
   fs.rmSync(path.join(out, `${base}.zip`), { force: true });
@@ -204,7 +290,7 @@ async function packageExtras(platform, dir, out) {
   const license = await singBoxLicense(out);
 
   if (platform === "mac") {
-    // .pkg：文件装到 /usr/local/libexec/neu-v6-free/package，postinstall 以 root 运行 install.sh；另放一个打开面板的 App
+    // .pkg：文件装到 /usr/local/libexec/neu-v6-free/package，postinstall 以 root 运行 install.sh（App 也由它装到 /Applications）
     const root = tmpDir(out, ".pkg-root");
     const pkgDir = path.join(root, "usr/local/libexec/neu-v6-free/package");
     fs.mkdirSync(path.dirname(pkgDir), { recursive: true });
@@ -214,39 +300,24 @@ async function packageExtras(platform, dir, out) {
     execFileSync("lipo", ["-create", await singBox(out, "darwin-arm64"), await singBox(out, "darwin-amd64"), "-output", sb]);
     fs.chmodSync(sb, 0o755);
     fs.copyFileSync(license, path.join(pkgDir, "sing-box-LICENSE.txt"));
-    const app = path.join(root, "Applications", "校园网 v6 免流.app", "Contents");
-    fs.mkdirSync(path.join(app, "MacOS"), { recursive: true });
-    fs.copyFileSync(path.join(ROOT, "mac/pkg/open-panel"), path.join(app, "MacOS/open-panel"));
-    fs.chmodSync(path.join(app, "MacOS/open-panel"), 0o755);
-    fs.writeFileSync(path.join(app, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleName</key><string>校园网 v6 免流</string>
-  <key>CFBundleDisplayName</key><string>校园网 v6 免流</string>
-  <key>CFBundleIdentifier</key><string>io.github.concrise.neu-v6-free.panel</string>
-  <key>CFBundleExecutable</key><string>open-panel</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>${VERSION}</string>
-  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-  <key>LSUIElement</key><true/>
-</dict></plist>
-`);
     execFileSync("xattr", ["-cr", root]);
     const scripts = tmpDir(out, ".pkg-scripts");
     fs.copyFileSync(path.join(ROOT, "mac/pkg/postinstall"), path.join(scripts, "postinstall"));
     fs.chmodSync(path.join(scripts, "postinstall"), 0o755);
     const comp = tmpDir(out, ".pkg-comp");
-    // 面板入口固定装到 /Applications：pkgbuild 默认把 .app 当成「可搬移」的，别处有同 ID 的 App 时会装到那里去
+    // 包里的 App 只是安装材料（install.sh 再装到 /Applications）：pkgbuild 默认把 .app 当成「可搬移」的，
+    // 别处有同 ID 的 App 时会装到那里去，所以写明不可搬移
     const plist = path.join(comp, "components.plist");
+    const hasApp = fs.existsSync(path.join(pkgDir, APP_NAME));
     fs.writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><array><dict>
+<plist version="1.0"><array>${hasApp ? `<dict>
   <key>BundleHasStrictIdentifier</key><true/>
   <key>BundleIsRelocatable</key><false/>
   <key>BundleIsVersionChecked</key><false/>
   <key>BundleOverwriteAction</key><string>upgrade</string>
-  <key>RootRelativeBundlePath</key><string>Applications/校园网 v6 免流.app</string>
-</dict></array></plist>
+  <key>RootRelativeBundlePath</key><string>usr/local/libexec/neu-v6-free/package/${APP_NAME}</string>
+</dict>` : ""}</array></plist>
 `);
     execFileSync("pkgbuild", ["--quiet", "--root", root, "--component-plist", plist, "--scripts", scripts, "--identifier", "io.github.concrise.neu-v6-free",
       "--version", VERSION, "--install-location", "/", "--ownership", "recommended", path.join(comp, "neu-v6-free-core.pkg")],

@@ -1,0 +1,39 @@
+# 编译 Windows 外壳（windows/app：窗口 + 托盘图标）。每次推送都编一份，产物「neu-v6-free-windows-app」保留 90 天；
+# 本地打发布包时（node cli.js --package）按当前提交下载这份产物，放进 Windows 安装包的 app 目录。
+name: Windows App
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 画图标
+        shell: powershell  # Windows PowerShell 5.1，和用户电脑上一样
+        run: windows/app/make-icon.ps1 windows/app/app.ico
+
+      - name: 编译
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          dotnet publish windows/app/NeuV6Free.csproj -c Release -o out/app "-p:Version=$v"
+          Get-ChildItem out/app -Recurse -File | ForEach-Object { "{0,10:N0}  {1}" -f $_.Length, $_.FullName.Substring((Resolve-Path out/app).Path.Length + 1) }
+          $pv = (Get-Item out/app/neu-v6-free.exe).VersionInfo.ProductVersion
+          if ($pv -ne $v) { throw "exe 的版本是 $pv，应该是 $v" }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: neu-v6-free-windows-app
+          path: out/app
+          retention-days: 90
+          if-no-files-found: error

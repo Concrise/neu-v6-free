@@ -11,14 +11,15 @@ launchctl bootout "system/$LABEL" 2>/dev/null && echo "服务已停止" || echo 
 for s in helper traffic; do launchctl bootout "system/$LABEL.$s" 2>/dev/null || true; done
 rm -f "/Library/LaunchDaemons/$LABEL.plist" "/Library/LaunchDaemons/$LABEL.helper.plist" "/Library/LaunchDaemons/$LABEL.traffic.plist"
 rm -rf "/usr/local/libexec/$NAME"
-# 安装器（.pkg）装的：应用程序里的面板入口、安装记录
+# App（先关掉）、安装器（.pkg）的安装记录
+pkill -f "/Applications/校园网 v6 免流.app/Contents/MacOS/" 2>/dev/null || true
 rm -rf "/Applications/校园网 v6 免流.app"
 pkgutil --forget io.github.concrise.neu-v6-free >/dev/null 2>&1 || true
 if [ "${1:-}" = "--purge" ]; then
   rm -rf "$ETC_DIR" "$VAR_DIR"
   echo "已卸载并删除全部数据。可以重新打开其他代理软件。"
 else
-  rm -rf "$ETC_DIR/config.json" "$ETC_DIR/panel" "$VAR_DIR"/*.log "$VAR_DIR"/*.db
+  rm -rf "$ETC_DIR/config.json" "$ETC_DIR/config.json.prev" "$ETC_DIR/panel-secret" "$ETC_DIR/panel" "$VAR_DIR"/*.log "$VAR_DIR"/*.db
   rm -f "$ETC_DIR"/rules/*.srs
   echo "已卸载。可以重新打开其他代理软件。"
   echo "「我的规则」、订阅和设置（$ETC_DIR/rules、profile.json）以及流量统计（$VAR_DIR）保留，重新安装后接着用；要全部删除：sudo $0 --purge"

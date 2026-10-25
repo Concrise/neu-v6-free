@@ -68,12 +68,12 @@
 到 [Releases](https://github.com/Concrise/neu-v6-free/releases) 下载安装程序。安装前先退出其他代理软件（Clash、v2rayN、FlClash 等，托盘右键退出）。
 
 - **macOS**：`neu-v6-free-<版本>-macos.pkg`，双击安装，输入电脑密码。安装程序没有经过苹果公证，被拦下时到
-  「系统设置 → 隐私与安全性」底部点「仍要打开」。装好后「应用程序」里有「校园网 v6 免流」，点它打开面板。详见 [docs/macos.md](docs/macos.md)。
+  「系统设置 → 隐私与安全性」底部点「仍要打开」。装好后会打开「校园网 v6 免流」App：窗口里是面板，菜单栏有 v6 图标（看状态、暂停 / 重新启用、今天的流量）；退出 App 不影响免流。详见 [docs/macos.md](docs/macos.md)。
 - **Windows 10 / 11**：`neu-v6-free-<版本>-windows-setup.exe`，双击安装，管理员确认点「是」。没有数字签名，弹出「Windows 已保护你的电脑」时
-  点「更多信息 → 仍要运行」。装到 `C:\neu-v6-free`，开始菜单里有「校园网 v6 免流」，卸载在「设置 → 应用」。详见 [docs/windows.md](docs/windows.md)。
+  点「更多信息 → 仍要运行」。装到 `C:\neu-v6-free`，开始菜单和桌面有「校园网 v6 免流」，卸载在「设置 → 应用」。详见 [docs/windows.md](docs/windows.md)。
 
 安装程序自带 sing-box 内核，不用另外下载。只有这一次要管理员权限。装完会自检，不通自动撤回；
-通过后浏览器自动打开面板并登录（面板密钥是安装时随机生成的）。
+通过后自动打开「校园网 v6 免流」App：窗口里是面板（自动登录，面板密钥是安装时随机生成的），菜单栏 / 托盘里有 v6 图标，能看运行状态、暂停 / 重新启用、看今天的流量。关掉窗口、退出 App 都不影响免流。
 
 装好时是**第一部分**：有 IPv6 的国内网站已经在走 v6 免费了。
 
@@ -116,7 +116,9 @@ sudo mac/install.sh                  # Windows：双击 out\windows\install.bat
 
 以后改了 `config.yaml`：重新生成，macOS 运行 `mac/update.sh`、Windows 双击新生成目录里的 `update.bat`（都不用管理员）。
 命令行生成的设置会同步到面板里；之后再用命令行更新，会用文件里的设置覆盖面板里改的。
-发布新版本：改 `package.json` 的版本号，运行 `node cli.js --package -o dist`（需要 `brew install makensis` 来编译 Windows 安装程序），
+发布新版本：改 `package.json` 的版本号，提交并推送，等 GitHub Actions 的「Windows App」编译完（Windows 的 App 在那里编译），
+再运行 `node cli.js --package -o dist`（需要 `brew install makensis` 编译 Windows 安装程序、`gh` 下载编好的 Windows App，
+macOS 的 App 用本机的 swiftc 编译），
 得到 macOS 的 `.pkg`、Windows 的 `-setup.exe`（都自带 sing-box）、两个 `.zip`（自动更新用）和 `SHA256SUMS`，
 再 `gh release create v<版本> dist/*.pkg dist/*.exe dist/*.zip dist/SHA256SUMS`。已经装好的客户端会在一天内发现并提示更新。
 
@@ -161,8 +163,9 @@ cli.js              命令行生成器
 lib/                生成逻辑（命令行、网页生成器、面板共用）：groups.js 是分组与规则定义，build.js 生成 sing-box 配置，
                     subscription.js 解析订阅与节点链接，convert.js 把节点转成 sing-box 出站
 panel/              网页面板（单个 HTML 文件；安装时 lib/ 一起装进 panel/lib/，面板在浏览器里生成配置）
-mac/                macOS 安装 / 更新 / 卸载脚本，本地助手 helper.py；pkg/ 是 .pkg 安装程序的资源
-windows/            Windows 安装 / 更新 / 卸载脚本，本地助手 helper.ps1；installer.nsi 是 setup.exe 的 NSIS 脚本
+mac/                macOS 安装 / 更新 / 卸载脚本，本地助手 helper.py；pkg/ 是 .pkg 安装程序的资源，app/ 是 App（Swift）
+windows/            Windows 安装 / 更新 / 卸载脚本，本地助手 helper.ps1；installer.nsi 是 setup.exe 的 NSIS 脚本，
+                    app/ 是 App（C# + WebView2，在 GitHub Actions 上编译：.github/workflows/windows-app.yml）
 licenses/           随安装程序附带的第三方许可证（sing-box 的 GPLv3 全文）
 server/setup.sh     第二部分的服务器一键部署脚本
 web/                网页生成器
