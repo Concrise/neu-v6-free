@@ -7,111 +7,221 @@
 <style>
   :root {
     color-scheme: light dark;  /* 滚动条、输入框、下拉框跟着系统深色 / 浅色（只换变量的话它们一直是浅色） */
-    --bg: #f5f6f8; --panel: #ffffff; --side: #eceef2; --text: #1c2027; --muted: #646b78; --faint: #8b919c;
-    --line: #e1e4ea; --accent: #2457d6; --accent-soft: #e7eeff;
-    --free: #157f3b; --free-soft: #e3f5e9; --paid: #b45309; --paid-soft: #fdf0dc; --mix: #2457d6; --mix-soft: #e7eeff;
-    --bad: #c62828; --bad-soft: #fde8e8; --shadow: 0 1px 2px rgba(16, 24, 40, .06);
+    --bg: #f4f5f7; --side: #eceef2; --panel: #ffffff; --sunken: #eef0f3; --field: #ffffff; --line: #e1e4e9;
+    --text: #14171c; --muted: #5b6270; --faint: #6b7280; --nav-on: #ffffff;
+    --accent: #1f5fd1; --on-accent: #ffffff; --accent-soft: #eaf0fd; --accent-line: #c9d8f7;
+    --free: #0e7a5a; --free-soft: #e2f4ec; --paid: #9a5b13; --paid-soft: #fbefdd; --mix: #1f5fd1; --mix-soft: #eaf0fd;
+    --bad: #b42318; --bad-soft: #fdeceb; --lift: 0 1px 2px rgba(16, 24, 40, .12);
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #14161b; --panel: #1c1f26; --side: #181a20; --text: #e7e9ee; --muted: #a0a6b2; --faint: #7d838f;
-      --line: #2c303a; --accent: #7aa2ff; --accent-soft: #232f4d;
-      --free: #5fd38a; --free-soft: #17301f; --paid: #f2b35c; --paid-soft: #352813; --mix: #7aa2ff; --mix-soft: #232f4d;
-      --bad: #f58a8a; --bad-soft: #3a1d1d; --shadow: none; }
+    :root { --bg: #111318; --side: #14171c; --panel: #181b21; --sunken: #1e2229; --field: #13161b; --line: #2a2f38;
+      --text: #e8eaee; --muted: #a3a9b5; --faint: #8d94a1; --nav-on: #232832;
+      --accent: #7ea6ff; --on-accent: #0b1220; --accent-soft: #1c2740; --accent-line: #2c3d63;
+      --free: #5cd3a2; --free-soft: #12291f; --paid: #f0b35e; --paid-soft: #2e2312; --mix: #7ea6ff; --mix-soft: #1c2740;
+      --bad: #f58a8a; --bad-soft: #3a1d1d; --lift: 0 1px 2px rgba(0, 0, 0, .4); }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  body { margin: 0; font: 15px/1.65 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
          background: var(--bg); color: var(--text); }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  .app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
-  nav { background: var(--side); border-right: 1px solid var(--line); padding: 16px 10px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
-  nav .brand { font-weight: 700; font-size: 15px; margin: 2px 10px 2px; }
-  nav .sub { color: var(--muted); font-size: 12px; margin: 0 10px 14px; }
-  nav a { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; color: inherit; margin: 1px 0; }
-  nav a:hover { background: var(--line); text-decoration: none; }
-  nav a.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-  nav a .n { margin-left: auto; font-size: 12px; color: var(--muted); font-weight: 400; }
-  main { padding: 26px 32px 60px; min-width: 0; }
-  .wrap { max-width: 1100px; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  h2 { font-size: 16px; margin: 28px 0 10px; }
-  .lead { color: var(--muted); margin: 0 0 18px; max-width: 820px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow); }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-  .stat .k { color: var(--muted); font-size: 12.5px; }
-  .stat .v { font-size: 22px; font-weight: 650; margin: 2px 0; font-variant-numeric: tabular-nums; }
-  .stat .s { color: var(--muted); font-size: 12.5px; }
-  .badge { display: inline-block; font-size: 12px; line-height: 18px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
+  svg.i { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* 布局：左边菜单，右边内容 */
+  .app { display: grid; grid-template-columns: 224px 1fr; min-height: 100vh; }
+  .app.bare { grid-template-columns: 1fr; }
+  .app.bare nav { display: none; }
+  nav { background: var(--side); border-right: 1px solid var(--line); padding: 22px 12px 16px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+        display: flex; flex-direction: column; gap: 3px; }
+  nav .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 16px; font-weight: 650; }
+  .logo { width: 32px; height: 32px; border-radius: 9px; background: var(--text); color: var(--bg); display: grid; place-items: center;
+          font-weight: 700; font-size: 13px; letter-spacing: -.3px; flex: none; }
+  nav a { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 12px; border-radius: 10px; color: var(--muted); font-weight: 550; }
+  nav a:hover { color: var(--text); background: var(--nav-on); text-decoration: none; }
+  nav a.on { background: var(--nav-on); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
+  nav a .n { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--accent); }
+  nav .space { flex-grow: 1; min-height: 16px; }
+  nav .ver { padding: 6px 12px 0; font-size: 12px; color: var(--faint); }
+  main { min-width: 0; padding: 32px 24px 64px; }
+  .wrap { max-width: 960px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .wrap.narrow { max-width: 760px; }
+  h1 { font-size: 26px; line-height: 1.3; font-weight: 700; letter-spacing: -.3px; margin: 0; }
+  h2 { font-size: 17px; font-weight: 650; margin: 0; }
+  .lead { color: var(--muted); margin: 4px 0 0; max-width: 820px; }
+  .back { font-size: 14px; margin-bottom: 6px; display: inline-block; }
+  .sec { display: flex; flex-direction: column; gap: 12px; }
+  .sec-head { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  .sec-head > div { flex: 1 1 280px; }
+  .sec-head p { margin: 2px 0 0; font-size: 14px; color: var(--muted); }
+
+  /* 基本部件 */
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .card.big { border-radius: 16px; padding: 22px 24px; }
+  .list { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+  .li { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 13px 20px; border-top: 1px solid var(--line); }
+  .li:first-child { border-top: 0; }
+  .li .main { flex: 1 1 220px; min-width: 0; }
+  .li .t { font-weight: 600; }
+  .li .d { font-size: 13px; color: var(--muted); }
+  .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  a.li { color: var(--text); min-height: 64px; }
+  a.li:hover { text-decoration: none; background: var(--sunken); }
+  .list > a.li:first-child { border-radius: 14px 14px 0 0; }
+  .list > a.li:last-child { border-radius: 0 0 14px 14px; }
+  .badge { display: inline-block; font-size: 12px; line-height: 18px; padding: 1px 9px; border-radius: 999px; white-space: nowrap; font-weight: 650; }
   .b-free { background: var(--free-soft); color: var(--free); }
   .b-paid { background: var(--paid-soft); color: var(--paid); }
   .b-mix { background: var(--mix-soft); color: var(--mix); }
-  .b-muted { background: var(--line); color: var(--muted); }
+  .b-muted { background: var(--sunken); color: var(--muted); font-weight: 550; }
   .b-bad { background: var(--bad-soft); color: var(--bad); }
-  .btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px; padding: 6px 12px;
-         cursor: pointer; font: inherit; white-space: nowrap; }
-  .btn:hover { border-color: var(--accent); }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn.small { padding: 2px 9px; font-size: 12.5px; }
-  .btn.link { border: 0; background: none; color: var(--accent); padding: 0; }
-  .btn:disabled { opacity: .5; cursor: default; }
-  select, input[type=text], input[type=password], input[type=search], textarea {
-    border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px; padding: 6px 10px; font: inherit; max-width: 100%; }
-  select { padding-right: 6px; }
-  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
-  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 16px; border-radius: 10px;
+         border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; font: inherit; font-size: 14px; white-space: nowrap; }
+  .btn:hover { border-color: var(--accent-line); text-decoration: none; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 650; }
+  .btn.big { min-height: 44px; padding: 0 22px; font-size: 15px; }
+  .btn.small { min-height: 32px; padding: 0 11px; font-size: 13px; border-radius: 8px; }
+  .btn.ghost { background: transparent; color: var(--muted); }
+  .btn.link { border: 0; background: none; color: var(--accent); padding: 0; min-height: 0; }
+  .btn:disabled { opacity: .55; cursor: default; }
+  select, input[type=text], input[type=password], input[type=search], input[type=url], textarea {
+    border: 1px solid var(--line); background: var(--field); color: var(--text); border-radius: 10px; padding: 0 12px; min-height: 40px; font: inherit; max-width: 100%; }
+  textarea { padding: 10px 12px; }
+  input.big { min-height: 44px; padding: 0 14px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-line); border-color: var(--accent); }
+  input[type=checkbox], input[type=radio] { width: 17px; height: 17px; margin: 0; accent-color: var(--accent); }
+  label.check { display: flex; align-items: center; gap: 8px; min-height: 40px; cursor: pointer; font-size: 14px; }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
   tr:last-child td { border-bottom: 0; }
-  th { color: var(--muted); font-weight: 500; font-size: 12.5px; background: var(--panel); }
+  th { color: var(--muted); font-weight: 550; font-size: 13px; }
   td .muted, .muted { color: var(--muted); }
-  .small { font-size: 12.5px; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; word-break: break-all; }
+  .small { font-size: 13px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .grow { flex: 1; }
-  .flow { counter-reset: step; display: grid; gap: 10px; }
-  .step { display: grid; grid-template-columns: 30px 1fr minmax(230px, 340px); gap: 12px; align-items: center; }
-  .step .no { width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid;
-              place-items: center; font-weight: 600; font-size: 13px; }
-  .step .what b { display: block; }
-  .step .what span { color: var(--muted); font-size: 12.5px; }
-  .step .how { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
-  .step .how { flex-wrap: nowrap; }
-  .step .how select { flex: 1; min-width: 0; }
-  .note { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 10px 10px 0; margin: 14px 0; max-width: 860px; }
-  .note.warn { border-color: var(--paid); background: var(--paid-soft); }
-  .note.err { border-color: var(--bad); background: var(--bad-soft); }
+  .note { background: var(--accent-soft); border: 1px solid var(--accent-line); padding: 13px 18px; border-radius: 12px; }
+  .note.warn { background: var(--paid-soft); border-color: transparent; }
+  .note.err { background: var(--bad-soft); border-color: transparent; }
+  .note.bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .note.bar > span { flex: 1 1 300px; }
+  .hint { font-size: 13px; color: var(--muted); }
+  .hint.err, .err-msg { color: var(--bad); }
+
+  /* 选项：一组按钮选一个（线路、运行方式、去向） */
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 7px 14px; border-radius: 10px; border: 2px solid var(--line);
+          background: var(--panel); color: var(--text); font: inherit; cursor: pointer; text-align: left; max-width: 100%; }
+  .chip:hover { border-color: var(--accent-line); }
+  .chip.on { border-color: var(--accent); background: var(--accent-soft); }
+  .chip .tt { display: flex; flex-direction: column; min-width: 0; }
+  .chip .tt b { font-weight: 600; overflow-wrap: anywhere; }
+  .chip .tt span { font-size: 12px; color: var(--muted); }
+  .pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .pick .chip { flex-direction: column; align-items: flex-start; gap: 4px; padding: 16px 18px; border-radius: 14px; min-height: 92px; }
+  .pick .chip b { font-size: 16px; font-weight: 650; }
+  .pick .chip span { font-size: 14px; color: var(--muted); }
+  .seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--sunken); flex-wrap: wrap; }
+  .seg button { min-height: 34px; padding: 0 13px; border-radius: 8px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+  .seg button.on { background: var(--panel); color: var(--text); font-weight: 650; box-shadow: var(--lift); }
+
+  /* 概览 */
+  .hero { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .hero .ring { width: 52px; height: 52px; border-radius: 999px; display: grid; place-items: center; background: var(--free-soft); flex: none; }
+  .hero .ring i { width: 18px; height: 18px; border-radius: 999px; background: var(--free); }
+  .hero.warn .ring { background: var(--paid-soft); }
+  .hero.warn .ring i { background: var(--paid); }
+  .hero .txt { flex: 1 1 280px; }
+  .hero h1 { font-size: 28px; line-height: 1.25; }
+  .hero .txt div { color: var(--muted); }
+  .hero-note { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .stat { display: flex; flex-direction: column; gap: 6px; }
+  .stat .k { font-size: 13px; color: var(--muted); display: flex; gap: 8px; }
+  .stat .k span { flex-grow: 1; }
+  .stat .v { font-size: 34px; font-weight: 700; line-height: 1.15; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
+  .stat .v small { font-size: 18px; font-weight: 600; }
+  .stat .s { font-size: 13px; color: var(--muted); }
+  .stat .v.free { color: var(--free); }
+  .stat .v.paid { color: var(--paid); }
+  .bars { display: flex; align-items: flex-end; gap: 8px; height: 64px; }
+  .bars div { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; height: 64px; }
+  .bars i { display: block; border-radius: 3px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .legend i { width: 8px; height: 8px; border-radius: 2px; }
+  .via { display: flex; align-items: center; gap: 10px; flex: 1 1 220px; min-width: 0; }
+  .via b { font-weight: 600; overflow-wrap: anywhere; }
+  .via .arrow { color: var(--faint); }
+  .tip { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 18px 20px; border-radius: 14px; border: 1px dashed var(--line); }
+  .tip > div { flex: 1 1 320px; }
+
+  /* 新手引导 */
+  .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .steps div { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--muted); }
+  .steps i { height: 4px; border-radius: 2px; background: var(--line); }
+  .steps .done i { background: var(--accent); }
+  .steps .cur { color: var(--text); font-weight: 650; }
+  .lane { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .lane b { width: 128px; font-weight: 600; }
+  .lane i { flex: 1 1 160px; height: 8px; border-radius: 4px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .facts div { display: flex; flex-direction: column; gap: 4px; }
+  .facts b { font-weight: 600; }
+  .facts span { font-size: 13px; color: var(--muted); }
+  .facts.boxed div { border-radius: 12px; padding: 14px; background: var(--sunken); }
+  .checks .li { padding: 10px 16px; border-top: 0; }
+  .dot { width: 24px; height: 24px; border-radius: 999px; display: grid; place-items: center; font-size: 13px; font-weight: 700; border: 2px solid var(--line); flex: none; }
+  .dot.ok { background: var(--free); border-color: var(--free); color: var(--panel); }
+  .dot.run { border-color: var(--accent); color: var(--accent); }
+  .dot.bad { background: var(--bad); border-color: var(--bad); color: var(--panel); }
+
+  /* 订阅 */
+  .usage { height: 8px; border-radius: 4px; background: var(--sunken); overflow: hidden; }
+  .usage i { display: block; height: 8px; border-radius: 4px; background: var(--accent); }
+  .nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+  .node { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 10px; background: var(--sunken); font-size: 14px; }
+  .node span:first-child { flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 分组详情里的选项 */
   .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
-  .opt { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; display: grid; gap: 4px; }
-  .opt:hover { border-color: var(--accent); }
-  .opt.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .opt { background: var(--panel); border: 2px solid var(--line); border-radius: 12px; padding: 10px 14px; cursor: pointer; display: grid; gap: 4px; }
+  .opt:hover { border-color: var(--accent-line); }
+  .opt.on { border-color: var(--accent); background: var(--accent-soft); }
   .opt .t { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; word-break: break-all; }
-  .opt .d { color: var(--muted); font-size: 12.5px; }
-  .delay { font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 500; }
+  .opt .d { color: var(--muted); font-size: 13px; }
+  .delay { font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
   .d-ok { color: var(--free); } .d-mid { color: var(--paid); } .d-bad { color: var(--bad); }
-  .form { display: grid; grid-template-columns: 1fr 190px 260px auto; gap: 8px; align-items: start; }
-  .form .hint { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; min-height: 20px; }
-  .form .hint.err { color: var(--bad); }
-  .modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); display: grid; place-items: center; z-index: 10; padding: 16px; }
-  .modal { background: var(--panel); border-radius: 14px; border: 1px solid var(--line); padding: 20px 22px; width: min(560px, 100%); max-height: 90vh; overflow-y: auto; }
-  .modal h3 { margin: 0 0 6px; font-size: 17px; }
+
+  /* 弹窗、提示、登录 */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); display: grid; place-items: center; z-index: 10; padding: 16px; }
+  .modal { background: var(--panel); border-radius: 16px; border: 1px solid var(--line); padding: 22px 24px; width: min(560px, 100%); max-height: 90vh; overflow-y: auto; }
+  .modal h3 { margin: 0 0 6px; font-size: 18px; }
   .modal label.choice { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; cursor: pointer; }
+  .modal label.choice input { margin-top: 4px; }
   .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .modal input[type=text], .modal select, .modal textarea { width: 100%; }
   .field { margin: 12px 0; }
-  .field > .lbl { font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
-  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 16px;
+  .field > .lbl { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 18px;
            border-radius: 10px; z-index: 20; box-shadow: 0 4px 16px rgba(0, 0, 0, .2); max-width: 90vw; }
-  .login { max-width: 460px; margin: 14vh auto; }
-  .login input { width: 100%; margin: 8px 0 12px; }
-  .glossary { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-  .glossary .card b { display: block; margin-bottom: 4px; }
+  .login { max-width: 440px; margin: 14vh auto; display: flex; flex-direction: column; gap: 14px; }
+  .login input { width: 100%; }
+  details summary { cursor: pointer; }
   ol.prio { padding-left: 20px; } ol.prio li { margin: 6px 0; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   @media (max-width: 860px) {
-    .app { grid-template-columns: 1fr; } nav { position: static; height: auto; display: flex; flex-wrap: wrap; gap: 2px; }
-    nav .brand, nav .sub { width: 100%; } main { padding: 18px 16px 40px; }
-    .step { grid-template-columns: 30px 1fr; } .step .how { grid-column: 2; justify-content: flex-start; }
-    .form { grid-template-columns: 1fr; }
+    .app { grid-template-columns: 1fr; }
+    nav { position: static; height: auto; flex-direction: row; flex-wrap: wrap; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+    nav .brand { width: 100%; padding-bottom: 8px; }
+    nav .space, nav .ver { display: none; }
+    main { padding: 20px 16px 48px; }
     table { display: block; overflow-x: auto; }
+    .lane b { width: 100%; }
   }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .glossary { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .glossary .card b { display: block; margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -219,39 +329,54 @@ async function choose(group, name) {
 
 function groupSelect(name, cls = "") {
   const p = proxies[name];
-  const sel = $(`<select class="${cls}">${p.all.map((n) => `<option ${n === p.now ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>`);
+  const sel = $(`<select class="${cls}">${p.all.map((n) => `<option value="${esc(n)}" ${n === p.now ? "selected" : ""}>${esc(dn(n))}</option>`).join("")}</select>`);
   sel.onchange = () => choose(name, sel.value);
   return sel;
 }
 
 // ---------- 页面 ----------
-const PAGES = [
-  ["home", "🏠", "概览"], ["groups", "🧭", "分组与开关"], ["subs", "📦", "订阅与节点"], ["rules", "✏️", "我的规则"], ["conn", "🔌", "实时连接"],
-  ["traffic", "📊", "流量统计"], ["ports", "🔗", "固定端口"], ["logs", "📜", "日志"], ["settings", "⚙️", "设置"], ["help", "📖", "使用说明"],
-];
+const ICON = {
+  home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
+  routes: '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6h3a4 4 0 0 1 4 4M8.5 18h3a4 4 0 0 0 4-4"/>',
+  subs: '<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+  settings: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17.2v.1"/>',
+  next: '<path d="M9 6l6 6-6 6"/>',
+};
+const icon = (k) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
+// 菜单只有四项；实时连接、流量、日志、固定端口、常见问题从「设置 → 诊断」进，分组详情从「线路与规则」进
+const PAGES = [["home", "概览"], ["routes", "线路与规则"], ["subs", "订阅与节点"], ["settings", "设置"]];
+const SUBPAGES = { group: "routes", conn: "settings", traffic: "settings", ports: "settings", logs: "settings", help: "settings", welcome: "" };
+const OLD_PAGES = { groups: "routes", rules: "routes" };  // 以前的地址
 
 function route() {
   const h = decodeURIComponent(location.hash.replace(/^#\/?/, ""));
-  const [page, ...rest] = h.split("/");
-  return { page: PAGES.some((p) => p[0] === page) || page === "group" ? page : "home", arg: rest.join("/") };
+  let [page, ...rest] = h.split("/");
+  page = OLD_PAGES[page] || page;
+  const known = PAGES.some((p) => p[0] === page) || page in SUBPAGES;
+  return { page: known ? page : "home", arg: rest.join("/") };
+}
+
+/** 分组、出口名字前面的 emoji 只在显示时去掉（Clash API 里还是原名） */
+const dn = (name) => String(name ?? "").replace(/^[^\p{Script=Han}\p{Script=Latin}\p{N}（(]+/u, "") || String(name ?? "");
+
+/** 页面标题；从别的页面进来的带一个返回 */
+function head(title, lead, back) {
+  return $(`<div>${back ? `<a class="back" href="#/${back[0]}">← ${back[1]}</a>` : ""}<h1>${title}</h1>${lead ? `<p class="lead">${lead}</p>` : ""}</div>`);
 }
 
 function renderNav() {
   const { page } = route();
+  const cur = page in SUBPAGES ? SUBPAGES[page] : page;
   const nav = document.querySelector("nav");
-  const modeText = meta.mode === "tunnel" ? "模式二 · 自带服务器" : "模式一 · v6 优先直连";
-  nav.innerHTML = `<div class="brand">校园网 v6 免流</div><div class="sub">${modeText}${version ? " · " + esc(version.replace("sing-box ", "sing-box ")) : ""}</div>`;
-  for (const [key, icon, label] of PAGES) {
-    if (key === "ports" && !meta.info.length) continue;
+  nav.innerHTML = `<div class="brand"><span class="logo">v6</span>校园网 v6 免流</div>`;
+  for (const [key, label] of PAGES) {
     let n = "";
-    if (key === "rules" && userRules) n = userRules.rules.length;
-    if (key === "groups") n = meta.groups.length;
-    if (key === "subs" && prof()) n = prof().subscriptions.length + prof().nodes.length;
-    if (key === "settings" && prof()?.pending) n = "未应用";
     if (key === "settings" && helper.update?.available) n = "有更新";
-    const on = page === key || (key === "groups" && page === "group");
-    nav.append($(`<a href="#/${key}" class="${on ? "on" : ""}">${icon} ${label}<span class="n">${n}</span></a>`));
+    nav.append($(`<a href="#/${key}" class="${cur === key ? "on" : ""}"${cur === key ? ' aria-current="page"' : ""}>${icon(key)}${label}<span class="n">${n}</span></a>`));
   }
+  nav.append($(`<div class="space"></div>`), $(`<a href="#/welcome" class="${page === "welcome" ? "on" : ""}">${icon("help")}新手引导</a>`),
+    $(`<div class="ver">${esc([helper.version && "版本 " + helper.version, version].filter(Boolean).join(" · "))}</div>`));
 }
 
 function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
@@ -259,146 +384,364 @@ function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
 function render() {
   stopTimer();
   if (logWs) { logWs.close(); logWs = null; }
-  renderNav();
   const { page, arg } = route();
+  document.querySelector(".app").classList.toggle("bare", page === "welcome");
+  renderNav();
   const m = main();
   m.innerHTML = "";
-  if (prof()?.pending) m.append(pendingBar());
-  ({ home: renderHome, groups: renderGroups, group: () => renderGroup(arg), rules: renderRules, conn: renderConn,
-    traffic: renderTraffic, ports: renderPorts, help: renderHelp, subs: renderSubs, settings: renderSettings, logs: renderLogs })[page]();
+  m.classList.toggle("narrow", page === "welcome");
+  if (prof()?.pending && page !== "welcome") m.append(pendingBar());
+  ({ home: renderHome, routes: renderRoutes, group: () => renderGroup(arg), conn: renderConn, traffic: renderTraffic, ports: renderPorts,
+    help: renderHelp, subs: renderSubs, settings: renderSettings, logs: renderLogs, welcome: renderWelcome })[page]();
   window.scrollTo(0, 0);
 }
 
 // ---------- 概览 ----------
+/** 34px 的大数字：GB 或 MB */
+const bigSize = (b) => b >= 1073741824 ? `${(b / 1073741824).toFixed(b >= 107374182400 ? 0 : 1)} <small>GB</small>` : `${Math.round(b / 1048576)} <small>MB</small>`;
+
 function renderHome() {
   const m = main();
   const tunnel = meta.mode === "tunnel";
-  m.append($(`<div><h1>概览</h1><p class="lead">${tunnel
-    ? "校园网 IPv6 免费、IPv4 计费。有 IPv6 的国内网站直接走 v6；没有 IPv6 的，经你自己的服务器转一下（v6 进、v4 出），也免费。"
-    : "校园网 IPv6 免费、IPv4 计费。这份配置让能走 v6 的流量都走 v6；只有 IPv4 的国内网站照常 v4 直连（计费）。"}</p></div>`));
-
   if (helper.update?.available) {
-    m.append($(`<div class="note"><b>有新版本 ${esc(helper.update.latest)}</b>：到 <a href="#/settings">⚙️ 设置 → 版本与更新</a> 一键更新，
-      不用管理员密码，订阅、设置和我的规则都保留。</div>`));
+    m.append($(`<div class="note bar"><span><b>有新版本 ${esc(helper.update.latest)}</b>：点一下就更新，不用管理员密码，订阅、设置和规则都保留。</span>
+      <a class="btn" href="#/settings">去更新</a></div>`));
   }
-  const p = prof();
-  if (p && !p.subscriptions.length && !p.nodes.length && !Object.keys(p.settings.entry_servers || {}).length) {
-    m.append($(`<div class="card" style="margin-bottom:16px;border-color:var(--accent)"><b>👋 开始使用</b>
-      <ol class="prio small" style="margin:8px 0 0">
-        <li>现在已经在省流：有 IPv6 的国内网站都走 v6（免费）。什么都不加也可以一直这样用。</li>
-        <li>有机场订阅或自己的节点？到 <a href="#/subs">📦 订阅与节点</a> 加进来，国外网站就能用了。</li>
-        <li>有自己的双栈服务器？先把它的节点加进来，再到 <a href="#/settings">⚙️ 设置</a> 把它设成免流服务器：只有 IPv4 的网站也免费。</li>
-        <li>改完点页面上方的「应用」。之后每个分组走哪里，在「分组与开关」里随时切换。</li>
-      </ol></div>`));
-  }
-  if (helper.server_fallback) {
-    m.append($(`<div class="note warn"><b>当前网络连不上免流服务器</b>，已在 ${esc(String(helper.server_fallback.since).replace("T", " "))} 自动改走「不用服务器」：
-      经服务器的流量改为直连（IPv4 计费）。原来选的是「${esc(helper.server_fallback.previous)}」，能连上后会自动切回；手动改选「免流服务器」则不再自动切换。</div>`));
-  }
-  const cards = $(`<div class="cards"></div>`);
-  const card = (k, v, s) => cards.append($(`<div class="card stat"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`));
-  const runCard = $(`<div class="card stat"><div class="k">运行状态</div><div class="v"><span class="badge b-free">运行中</span></div>
-    <div class="s">${esc(version || "sing-box")}</div></div>`);
+  // 运行状态。暂停 = 停掉 sing-box，电脑回到普通网络；面板也会跟着打不开，去本地助手的状态页重新启用
+  const fb = helper.server_fallback;
+  const hero = $(`<section class="card big" aria-label="运行状态"><div class="hero ${fb ? "warn" : ""}"><div class="ring"><i></i></div>
+    <div class="txt"><h1>${fb ? "正在免流 · 离校模式" : "正在免流"}</h1><div>${fb ? "连不上你的服务器，原本经服务器的流量暂时直接连出去（计费）。"
+      : tunnel ? "有 IPv6 的网站走 IPv6，其余经你的服务器出去，都不计费。" : "有 IPv6 的网站走 IPv6，不计费；只有 IPv4 的照常计费。"}</div></div></div></section>`);
   if (helper.ok && helper.error !== "old") {
-    // 暂停 = 停掉 sing-box，电脑回到普通网络；面板也会跟着打不开，去本地助手的状态页重新启用
-    const pause = $(`<button class="btn small" style="margin-top:6px">暂停（回到普通网络）</button>`);
+    const pause = $(`<button class="btn big">暂停</button>`);
     pause.onclick = async () => {
-      if (!confirm("暂停后 sing-box 停止，电脑回到普通网络（v4 计费）。面板会打不开，之后在 " + helperBase() + "/ 重新启用。确定？")) return;
+      if (!confirm("暂停后 sing-box 停止，电脑回到普通的校园网（IPv4 计费）。这个窗口会显示状态页，在那里重新启用。确定？")) return;
       try { await helperApi("/pause", { method: "POST" }); location.href = helperBase() + "/"; } catch (e) { toast("暂停失败：" + e.message); }
     };
-    runCard.append(pause);
+    hero.querySelector(".hero").append(pause);
   }
-  cards.append(runCard);
-  if (meta.clash_modes) cards.append(modeSwitch());
-  card("模式", tunnel ? "模式二" : "模式一", tunnel ? "自带双栈服务器：只有 v4 的流量也能免费" : "不用服务器：只省有 v6 的那部分");
-  const helperState = !helper.ok ? `<span class="badge b-paid">未连接</span>` : helper.rules ? `<span class="badge b-free">正常</span>` : `<span class="badge b-paid">需要更新</span>`;
-  card("本地助手", helperState, helper.rules ? "「我的规则」可用" : `<a href="#/rules">看怎么开启</a>`);
-  const trafficCard = $(`<div class="card stat"><div class="k">本月省下</div><div class="v">—</div><div class="s">${helper.traffic ? "读取中" : "这个平台没有流量统计"}</div></div>`);
-  cards.append(trafficCard);
-  m.append(cards);
+  if (fb) {
+    hero.append($(`<div class="hero-note">${esc(String(fb.since).replace("T", " "))} 起，原来选的是「${esc(dn(fb.previous))}」。能连上服务器后会自动切回；这期间有 IPv6 的网站照样免费。
+      在学校里也看到这个，多半是服务器挂了或流量用完了。</div>`));
+  } else if (!helper.ok) {
+    hero.append($(`<div class="hero-note">连不上本地助手（${esc(helperBase())}）：流量统计、规则和订阅管理暂时用不了，免流本身不受影响。${esc(helperHelp())}</div>`));
+  }
+  m.append(hero);
+
   if (helper.traffic) {
+    const stats = $(`<div class="stats">
+      <div class="card stat"><div class="k">本月省下</div><div class="v free">—</div><div class="s">走 IPv6 和服务器的免费流量</div></div>
+      <div class="card stat"><div class="k">本月计费</div><div class="v paid">—</div><div class="s">只有 IPv4、直接连出去的流量</div></div>
+      <div class="card stat"><div class="k"><span>最近 7 天</span><a href="#/traffic">明细</a></div><div class="bars" role="img" aria-label="最近 7 天每天的免费和计费流量"></div>
+        <div class="legend"><span><i style="background:var(--free)"></i>免费</span><span><i style="background:var(--paid)"></i>计费</span></div></div></div>`);
+    m.append(stats);
     helperApi("/traffic").then((d) => {
-      const mk = new Date().toISOString().slice(0, 7), x = d.months[mk];
-      if (!x) return;
-      const srv = Object.values(x.server || {}).reduce((a, b) => a + b, 0);
-      trafficCard.querySelector(".v").textContent = gb(x.v6 + srv);
-      trafficCard.querySelector(".s").innerHTML = `计费 v4 用了 ${gb(x.v4)} · <a href="#/traffic">详情</a>`;
+      const now = new Date(), pad = (n) => String(n).padStart(2, "0"), key = (t) => `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+      const x = d.months[key(now).slice(0, 7)] || { v6: 0, server: {}, v4: 0 };
+      const [free, paid] = stats.querySelectorAll(".v");
+      free.innerHTML = bigSize(x.v6 + srvSum(x));
+      paid.innerHTML = bigSize(x.v4);
+      const days = [];
+      for (let i = 6; i >= 0; i--) {
+        const t = new Date(now);
+        t.setDate(now.getDate() - i);
+        const y = d.days[key(t)] || {};
+        days.push([(y.v6 || 0) + srvSum(y), y.v4 || 0, key(t).slice(5)]);
+      }
+      const max = Math.max(1, ...days.map(([f, p]) => f + p));
+      if (max === 1) { stats.querySelector(".bars").outerHTML = `<div class="hint" style="height:64px;display:grid;place-items:center">还没有数据</div>`; return; }
+      const h = (b) => (b ? Math.max(2, Math.round(b / max * 60)) : 0);
+      stats.querySelector(".bars").innerHTML = days.map(([f, p, k]) =>
+        `<div title="${k}：免费 ${gb(f)}B，计费 ${gb(p)}B"><i style="background:var(--paid);height:${h(p)}px"></i><i style="background:var(--free);height:${h(f)}px"></i></div>`).join("");
     }).catch(() => { });
   }
 
-  m.append($(`<h2>流量怎么走（从上往下，命中就停）</h2>`));
-  const flow = $(`<div class="card flow"></div>`);
-  let no = 0;
-  const step = (what, sub, how) => {
-    const s = $(`<div class="step"><div class="no">${++no}</div><div class="what"><b>${what}</b><span>${sub}</span></div><div class="how"></div></div>`);
-    if (how) s.querySelector(".how").append(...[].concat(how));
-    flow.append(s);
-  };
-  const fixed = (name, badge) => $(`<span class="row"><span>${esc(name)}</span>${badge}</span>`);
-  const sw = (name) => proxies[name] ? [groupSelect(name), $(costBadge(name))] : null;
-  const nRules = userRules ? userRules.rules.length : null;
-  step("我的规则", nRules === null ? "你在面板里加的规则，优先级最高" : `你在面板里加的 ${nRules} 条规则，优先级最高`,
-    $(`<a class="btn small" href="#/rules">管理</a>`));
-  const svc = meta.groups.filter((g) => g.kind === "service");
-  step("例外分组", svc.slice(0, 5).map((g) => g.name).join("、") + ` 等 ${svc.length} 个：按 App 或网站类别单独决定`,
-    $(`<a class="btn small" href="#/groups">查看与修改</a>`));
-  step("国内网站有 IPv6", "固定走 v6 直连，最快也免费，不需要选", fixed("直连 v6", `<span class="badge b-free">免费</span>`));
-  if (proxies["国内仅 v4 网站"]) step("国内网站只有 IPv4", "选服务器 = 免费但网站看到服务器 IP；选直连 v4 = 计费，和不开代理一样", sw("国内仅 v4 网站"));
-  else step("国内网站只有 IPv4", "模式一没有服务器，只能 v4 直连", fixed("直连 v4", `<span class="badge b-paid">计费</span>`));
-  if (proxies["国外网站"]) step("其余（国外网站）", "没被上面任何一条匹配到的流量都走这里", sw("国外网站"));
-  if (tunnel && proxies["免流服务器"]) step("上面凡是「经服务器」的", "都从这台服务器出去；它挂了或流量用完就换一台", sw("免流服务器"));
-  m.append(flow);
+  // 现在怎么走：三类网站各走哪里
+  const now = $(`<section class="list" aria-labelledby="now-h"><div class="li"><h2 id="now-h" class="grow">现在怎么走</h2></div></section>`);
+  if (meta.clash_modes) now.firstElementChild.append(modeSwitch());
+  const mode = (clashMode || "Rule").toLowerCase();
+  if (mode !== "rule") {
+    now.append($(`<div class="li"><span class="hint">${mode === "global" ? "现在是「全部走代理」：所有网站都走「国外网站」的选择，国内网站也绕出去。"
+      : "现在是「全部直连」：所有网站都直接连，有 IPv6 走 IPv6，没有的走 IPv4（计费）。"}平时选「智能分流」。</span></div>`));
+  }
+  const row = (what, hint, via, badge) => now.append($(`<div class="li"><div class="main"><div class="t">${what}</div><div class="d">${hint}</div></div>
+    <div class="via"><span class="arrow" aria-hidden="true">→</span><b>${esc(via)}</b>${badge}</div><a href="#/routes" class="small">修改</a></div>`));
+  row("有 IPv6 的国内网站", "B 站、淘宝、知乎等，自动识别", "直连 IPv6", `<span class="badge b-free">免费</span>`);
+  if (proxies["国内仅 v4 网站"]) row("只有 IPv4 的国内网站", "还没有 IPv6 的国内网站", dn(proxies["国内仅 v4 网站"].now), costBadge("国内仅 v4 网站"));
+  else row("只有 IPv4 的国内网站", "没有服务器时只能直接连", "直连 IPv4", `<span class="badge b-paid">计费</span>`);
+  if (proxies["国外网站"]) row("国外网站", "Google、GitHub、YouTube……", dn(proxies["国外网站"].now), costBadge("国外网站"));
+  if (tunnel && meta.entry && proxies[meta.entry]) row("免流服务器", "上面「经服务器」的都从它出去", dn(proxies[meta.entry].now), costBadge(meta.entry));
+  m.append(now);
 
-  m.append($(`<div class="note">某个网站或 App 走得不对（打不开、太慢、被当成海外用户）？去 <a href="#/conn">实时连接</a> 找到它，点「改规则」，
-    1–2 秒后生效，不用重新生成配置。分组的选择会自动保存，重启后保持。</div>`));
+  const p = prof();
+  const noSubs = p ? !p.subscriptions.length && !p.nodes.length : !meta.subscriptions?.length;
+  if (helper.client && noSubs && !tunnel) {
+    m.append($(`<div class="tip"><div><b>还没加订阅：国外网站现在打不开。</b><div class="hint">有机场订阅的话，加进来就能用；只想省 IPv6 流量就不用管。</div></div>
+      <a class="btn" href="#/subs">加订阅</a></div>`));
+  }
+  m.append($(`<div class="tip"><div><b>某个网站打不开、太慢，或者被当成海外用户？</b><div class="hint">把网址粘到「线路与规则」，选它走哪里，一两秒后生效。</div></div>
+    <a class="btn" href="#/routes">去改</a></div>`));
 }
 
-// ---------- 分组与开关 ----------
-function renderGroups() {
+// ---------- 新手引导 ----------
+// 第一次打开、还没加过订阅、节点和服务器时自动出现；以后从菜单底部的「新手引导」再打开
+let wiz = null;
+const WELCOMED = "neu-welcomed";
+function markWelcomed() { try { localStorage.setItem(WELCOMED, "1"); } catch { } }
+function shouldWelcome() {
+  try { if (localStorage.getItem(WELCOMED) === "1") return false; } catch { return false; }
+  if (!helper.client || !client || meta.mode === "tunnel" || meta.subscriptions?.length) return false;
+  const p = prof();
+  return !p || (!p.subscriptions.length && !p.nodes.length && !Object.keys(p.settings.entry_servers || {}).length);
+}
+
+function renderWelcome() {
   const m = main();
-  m.append($(`<div><h1>分组与开关</h1><p class="lead">每个分组管一类流量，在下拉框里选它走哪里，立即生效、自动保存。
-    「默认」是生成配置时的选择；点分组名可以看每个选项的说明并测延迟。</p></div>`));
-  const sections = [["base", "总开关", "决定大部分流量。例外分组里选「跟随……」的，也听它们的。"],
-    ["service", "例外分组", "按 App 或网站类别单独决定，优先于总开关。"]];
-  for (const [kind, title, sub] of sections) {
-    const gs = meta.groups.filter((g) => g.kind === kind && proxies[g.name]);
-    if (!gs.length) continue;
-    m.append($(`<h2>${title} <span class="muted small" style="font-weight:400">${sub}</span></h2>`));
-    const t = $(`<table><thead><tr><th style="width:24%">分组</th><th>管哪些流量</th><th style="width:300px">现在走</th></tr></thead><tbody></tbody></table>`);
-    for (const g of gs) {
-      const p = proxies[g.name];
-      const tr = $(`<tr><td><a href="#/group/${encodeURIComponent(g.name)}"><b>${esc(g.name)}</b></a></td>
-        <td class="small muted">${esc(g.desc)}</td><td><div class="row sel"></div><div class="small muted st" style="margin-top:4px"></div></td></tr>`);
-      tr.querySelector(".sel").append(groupSelect(g.name, "grow"), $(costBadge(g.name)));
-      const st = tr.querySelector(".st");
-      if (g.default && g.default !== p.now) {
-        st.innerHTML = `已改，默认是「${esc(g.default)}」 `;
+  const w = (wiz ||= { step: 1, choice: "sub", text: "", found: null, err: "", phase: 0, result: null });
+  const redraw = () => { if (route().page === "welcome") { m.innerHTML = ""; renderWelcome(); } };
+  const go = (n) => { w.step = n; w.err = ""; redraw(); };
+  const top = $(`<div class="row"><span class="logo">v6</span><b class="grow">校园网 v6 免流</b><button class="btn link">跳过，直接进入面板</button></div>`);
+  top.querySelector("button").onclick = () => { markWelcomed(); wiz = null; location.hash = "#/home"; };
+  const names = ["认识一下", "你有什么", "填一下", "应用"];
+  const steps = $(`<div class="steps" aria-label="第 ${w.step} 步，共 4 步">${names.map((n, i) =>
+    `<div class="${i < w.step ? "done" : ""} ${i + 1 === w.step ? "cur" : ""}"><i></i>${i + 1} · ${n}</div>`).join("")}</div>`);
+  const body = $(`<div class="sec" style="gap:18px"></div>`);
+  const foot = $(`<div class="row" style="border-top:1px solid var(--line);padding-top:18px"></div>`);
+  const card = $(`<div class="card big sec" style="gap:22px;padding:32px 32px 24px"></div>`);
+  card.append(body, foot);
+  m.append(top, steps, card, $(`<p class="hint" style="text-align:center;margin:0">这个引导只在第一次打开时出现；以后点菜单底部的「新手引导」能再打开。</p>`));
+  const title = (h, p) => body.append($(`<div><h1>${h}</h1><p class="lead">${p}</p></div>`));
+  const button = (label, cls, fn) => { const b = $(`<button class="btn big ${cls}">${label}</button>`); b.onclick = fn; return b; };
+  const tips = () => body.append($(`<div class="facts boxed"><div><b>平时只看「概览」</b><span>在不在免流、这个月省了多少，一眼看到</span></div>
+    <div><b>网站打不开？</b><span>到「线路与规则」粘贴网址，选它走哪里</span></div>
+    <div><b>离开学校时</b><span>连不上服务器会自动改走直连，回来自动切回</span></div></div>`));
+  const enter = () => { markWelcomed(); wiz = null; location.hash = "#/home"; location.reload(); };
+
+  if (w.step === 1) {
+    title("你的电脑已经在省流了", "校园网的 IPv6 流量不计费，IPv4 计费。装好以后，能走 IPv6 的流量都自动走 IPv6，你什么都不用做。");
+    body.append($(`<div class="card sec" style="background:var(--sunken)">
+      <div class="lane"><b>有 IPv6 的网站</b><i style="background:var(--free)"></i><span class="badge b-free">走 IPv6 · 免费</span></div>
+      <div class="lane"><b>只有 IPv4 的网站</b><i style="background:var(--paid)"></i><span class="badge b-paid">走 IPv4 · 计费</span></div>
+      <p class="hint" style="margin:0">国内大部分大网站（B 站、淘宝、知乎……）都有 IPv6。想让只有 IPv4 的网站也免费，需要一台自己的服务器，下一步可以选。</p></div>`),
+    $(`<div class="facts"><div><b>装好就生效</b><span>开机自动运行，不用每次打开</span></div>
+      <div><b>出问题自动让路</b><span>上不了网时自动暂停，回到普通网络</span></div>
+      <div><b>随时能关</b><span>概览页一个按钮暂停，再点一下恢复</span></div></div>`));
+  }
+
+  if (w.step === 2) {
+    title("你手上有什么？", "选一个最接近的。以后随时能在「订阅与节点」「设置」里改。");
+    const list = $(`<div class="sec" role="radiogroup" aria-label="你手上有什么"></div>`);
+    for (const [id, t, d] of [["none", "什么都没有", "只省有 IPv6 的那部分。国外网站打不开。"], ["sub", "机场订阅", "还能上国外网站。粘贴一个订阅链接就行。"],
+      ["server", "自己的服务器（有 IPv6 的 VPS）", "只有 IPv4 的网站也免费，国外网站也走它。要先在服务器上运行一次部署脚本。"]]) {
+      const b = $(`<button type="button" role="radio" aria-checked="${w.choice === id}" class="chip ${w.choice === id ? "on" : ""}" style="width:100%;padding:14px 20px">
+        <span class="tt"><b style="font-size:16px">${t}</b><span style="font-size:14px">${d}</span></span></button>`);
+      b.onclick = () => { if (w.choice !== id) { w.choice = id; w.found = null; w.text = ""; } redraw(); };
+      list.append(b);
+    }
+    body.append(list);
+  }
+
+  if (w.step === 3) {
+    if (w.choice === "none") title("不用填任何东西", "现在的设置就是「只省 IPv6」。以后有了订阅或服务器，到「订阅与节点」加进来就行，不用重装。");
+    else {
+      const sub = w.choice === "sub";
+      title(sub ? "粘贴订阅链接" : "粘贴服务器脚本的输出", sub ? "在机场的网站上找「复制订阅」或「Clash 订阅」，链接一般以 https:// 开头。只保存在这台电脑上。"
+        : `在服务器上运行一次 <span class="mono">bash setup.sh</span>，把最后输出的那一整段复制到这里。`);
+      const input = sub ? $(`<input type="url" id="wz-in" class="big grow" placeholder="https://…">`)
+        : $(`<textarea id="wz-in" rows="6" class="mono" style="width:100%" placeholder="entry_servers: …"></textarea>`);
+      input.value = w.text;
+      input.oninput = () => { w.text = input.value; };
+      const read = $(`<button class="btn big">${sub ? "读取" : "识别"}</button>`);
+      read.onclick = async () => {
+        read.disabled = true;
+        read.textContent = sub ? "下载中……" : "识别中……";
+        w.err = ""; w.found = null;
+        try {
+          if (sub) {
+            const s = { id: rid(), name: "", url: w.text.trim(), enabled: true };
+            if (!/^https?:\/\//i.test(s.url)) throw new Error("请填 http:// 或 https:// 开头的订阅链接");
+            await fetchSub(s);
+            w.found = { sub: s, title: `读到 ${s.proxies.length} 个节点（${s.name}）`, more: "国外网站默认「自动选最快」，以后可以在「线路与规则」里改。" };
+          } else {
+            const r = (await lib()).parseSubscription(w.text);
+            const srv = r.settings?.entry_servers;
+            if (!srv) throw new Error(r.proxies.length ? "认出了节点，但没有服务器的 IPv6 地址：请粘贴 setup.sh 最后输出的那一整段" : (r.errors[0] || "没有认出内容"));
+            w.found = { nodes: r.proxies, settings: r.settings, title: `认出 ${Object.keys(srv).length} 台服务器：${Object.values(srv).map((x) => x.label).join("、")}`,
+              more: `${r.proxies.length} 种连接方式。电脑用 IPv6 连过去，服务器再用 IPv4 访问网站。` };
+          }
+        } catch (e) { w.err = e.message; }
+        redraw();
+      };
+      body.append($(`<label for="wz-in" style="font-weight:600;font-size:14px;margin-bottom:-10px">${sub ? "订阅链接" : "脚本输出"}</label>`));
+      if (sub) { const r = $(`<div class="row"></div>`); r.append(input, read); body.append(r); }
+      else { body.append(input); const r = $(`<div class="row"></div>`); r.append(read); body.append(r); }
+      if (w.found) body.append($(`<div class="note" style="background:var(--free-soft);border-color:transparent"><b style="color:var(--free)">${esc(w.found.title)}</b><div class="hint">${esc(w.found.more)}</div></div>`));
+      if (w.err) body.append($(`<div class="note err">${esc(w.err)}</div>`));
+    }
+  }
+
+  if (w.step === 4) {
+    const r = w.result;
+    if (w.choice === "none") title("好了，可以用了", "以后打开这个窗口，看到的就是概览页。");
+    else {
+      title(r?.ok ? "好了，可以用了" : r ? "没有应用成功" : "正在应用",
+        r?.ok ? "以后打开这个窗口，看到的就是概览页。" : r ? "原来的配置没动，网络不受影响。" : "新配置上不了网会自动换回原来的，不用担心把网弄断。");
+      const items = [["保存设置", "已保存"], ["生成配置、重启 sing-box", "网络断开了几秒"], ["检查能不能上网", r?.fallback ? "连不上服务器，暂时改走直连" : "经 sing-box 正常"]];
+      const list = $(`<div class="list checks" style="padding:6px 0"></div>`);
+      items.forEach(([name, ok], i) => {
+        const done = r?.ok || i < w.phase, run = !r && (i === w.phase || (w.phase === 1 && i === 2)), bad = r && !r.ok && i === w.phase;
+        list.append($(`<div class="li"><span class="dot ${done ? "ok" : run ? "run" : bad ? "bad" : ""}">${done ? "✓" : bad ? "!" : run ? "…" : ""}</span>
+          <span class="grow">${name}</span><span class="hint">${done ? ok : bad ? "没通过" : run ? "进行中…" : "等待"}</span></div>`));
+      });
+      body.append(list);
+      if (r && !r.ok) body.append($(`<div class="note err">${esc(r.err)}</div>`));
+      if (r?.warnings?.length) body.append($(`<div class="note warn small">生成时的提示：${esc(r.warnings.join("；"))}</div>`));
+    }
+    if (w.choice === "none" || r?.ok) tips();
+  }
+
+  const busy = w.step === 4 && w.choice !== "none" && !w.result;
+  if (w.step > 1 && !busy && !(w.step === 4 && (w.choice === "none" || w.result?.ok))) foot.append(button("上一步", "ghost", () => go(w.step - 1)));
+  foot.append($(`<span class="grow hint">${w.step < 3 ? `第 ${w.step} 步，共 4 步` : w.step === 3 && w.choice !== "none" ? "应用时网络会断开几秒" : ""}</span>`));
+  if (w.step < 3) foot.append(button("下一步", "primary", () => go(w.step + 1)));
+  if (w.step === 3) {
+    const b = button(w.choice === "none" ? "完成" : "应用", "primary", () => { go(4); if (w.choice !== "none") wizApply(redraw); });
+    if (w.choice !== "none" && !w.found) b.disabled = true;
+    foot.append(b);
+  }
+  if (w.step === 4 && (w.choice === "none" || w.result?.ok)) foot.append(button("进入面板", "primary", enter));
+  if (w.step === 4 && w.result && !w.result.ok) foot.append(button("再试一次", "primary", () => wizApply(redraw)));
+}
+
+/** 引导最后一步：把订阅或服务器加进面板的设置，生成配置交给本地助手安装（不通自动换回） */
+async function wizApply(redraw) {
+  const w = wiz;
+  w.phase = 0; w.result = null; redraw();
+  try {
+    if (!client.profile) client.profile = { version: 1, settings: {}, subscriptions: [], nodes: [] };
+    const p = prof();
+    if (w.choice === "sub") {
+      if (!p.subscriptions.some((x) => x.url === w.found.sub.url)) p.subscriptions.push(w.found.sub);
+    } else {
+      const names = new Set(p.nodes.map((x) => x.name));
+      p.nodes.push(...w.found.nodes.filter((x) => !names.has(x.name)));
+      p.settings.entry_servers = { ...(p.settings.entry_servers || {}), ...w.found.settings.entry_servers };
+      if (w.found.settings.entry_default) p.settings.entry_default = w.found.settings.entry_default;
+    }
+    p.pending = true;
+    await saveProfile();
+    w.phase = 1; redraw();
+    const r = await applyClient();
+    w.phase = 3;
+    w.result = { ok: true, warnings: r.warnings, fallback: r.server_fallback };
+    markWelcomed();
+  } catch (e) { w.result = { ok: false, err: e.message }; }
+  redraw();
+}
+
+// ---------- 线路与规则 ----------
+// 一页管所有「走哪里」：最上面按网址加规则，然后是主要线路、按应用的例外分组、已有的规则
+const BASE_TITLES = { "国外网站": "国外网站", "国内仅 v4 网站": "只有 IPv4 的国内网站", "免流服务器": "免流服务器" };
+const BASE_ORDER = ["国外网站", "国内仅 v4 网站", "免流服务器"];
+let routesAll = false;
+
+function renderRoutes() {
+  const m = main();
+  m.append(head("线路与规则", "决定每类网站从哪儿出去。改了立即生效、自动保存，不用点「应用」。"));
+  m.append(addRuleCard());
+
+  const rank = (g) => (BASE_ORDER.includes(g.name) ? BASE_ORDER.indexOf(g.name) : 9);
+  const base = meta.groups.filter((g) => g.kind === "base" && proxies[g.name]).sort((a, b) => rank(a) - rank(b));
+  if (base.length) {
+    const sec = $(`<section class="sec" aria-labelledby="base-h"><div class="sec-head"><div><h2 id="base-h">主要线路</h2>
+      <p>管大部分流量。下面「按应用」里没单独设置的，都听这里的。</p></div></div></section>`);
+    for (const g of base) sec.append(lineCard(g));
+    m.append(sec);
+  }
+
+  const svc = meta.groups.filter((g) => g.kind === "service" && proxies[g.name]);
+  if (svc.length) {
+    const changedFromDefault = (g) => g.default && g.default !== proxies[g.name].now;
+    const shown = routesAll ? svc : svc.filter((g, i) => i < 8 || changedFromDefault(g));
+    const sec = $(`<section class="sec" aria-labelledby="app-h"><div class="sec-head"><div><h2 id="app-h">按应用单独设置</h2>
+      <p>比如 AI 固定用美国节点、Steam 下载走直连。一般不用动。</p></div></div><div class="list"></div></section>`);
+    if (svc.length > 8) {
+      const t = $(`<button class="btn">${routesAll ? "收起" : `显示全部 ${svc.length} 个`}</button>`);
+      t.onclick = () => { routesAll = !routesAll; render(); };
+      sec.querySelector(".sec-head").append(t);
+    }
+    const list = sec.querySelector(".list");
+    for (const g of shown) {
+      const li = $(`<div class="li"><div class="main"><a class="t" href="#/group/${encodeURIComponent(g.name)}" style="color:var(--text)">${esc(dn(g.name))}</a>
+        <div class="d clamp" title="${esc(g.desc)}">${esc(g.desc)}</div></div><div class="row sel" style="flex:0 1 320px;flex-wrap:nowrap"></div></div>`);
+      const sel = groupSelect(g.name, "grow");
+      sel.setAttribute("aria-label", `${dn(g.name)} 走哪里`);
+      sel.style.minWidth = "0";
+      li.querySelector(".sel").append(sel, $(costBadge(g.name)));
+      if (changedFromDefault(g)) {
         const b = $(`<button class="btn link small">恢复默认</button>`);
         b.onclick = () => choose(g.name, g.default);
+        const st = $(`<div class="d">已改，默认是「${esc(dn(g.default))}」 </div>`);
         st.append(b);
-      } else st.textContent = "默认";
-      t.tBodies[0].append(tr);
+        li.querySelector(".main").append(st);
+      }
+      list.append(li);
     }
-    m.append(t);
+    m.append(sec);
   }
+  m.append(rulesSection());
+}
+
+/** 主要线路的一张卡片：选项少就一排按钮，多（比如几十个节点）就用下拉框 */
+function lineCard(g) {
+  const p = proxies[g.name];
+  const card = $(`<div class="card sec"><div class="row" style="align-items:flex-start"><div class="grow" style="min-width:220px">
+    <div style="font-weight:650">${esc(BASE_TITLES[g.name] || dn(g.name))}</div><div class="hint">${esc(g.desc)}</div></div>
+    <a class="small" href="#/group/${encodeURIComponent(g.name)}">详情与测速</a></div></div>`);
+  if (p.all.length <= 6) {
+    const chips = $(`<div class="chips" role="radiogroup" aria-label="${esc(dn(g.name))}"></div>`);
+    for (const n of p.all) {
+      const on = n === p.now, t = proxies[n]?.type;
+      const tag = t === "URLTest" ? "自动测速选最快" : t === "Selector" ? `跟随「${dn(n)}」` : n === g.default ? "默认" : "";
+      const b = $(`<button type="button" role="radio" aria-checked="${on}" class="chip ${on ? "on" : ""}" title="${esc(optNote(n))}">
+        <span class="tt"><b>${esc(dn(n))}</b>${tag ? `<span>${esc(tag)}</span>` : ""}</span>${costBadge(n)}</button>`);
+      b.onclick = () => { if (!on) choose(g.name, n); };
+      chips.append(b);
+    }
+    card.append(chips);
+  } else {
+    const r = $(`<div class="row" style="flex-wrap:nowrap"><span class="small muted" style="white-space:nowrap">现在走</span></div>`);
+    const sel = groupSelect(g.name, "grow");
+    sel.setAttribute("aria-label", dn(g.name));
+    sel.style.minWidth = "0";
+    r.append(sel, $(costBadge(g.name)));
+    card.append(r);
+  }
+  if (g.default && g.default !== p.now) {
+    const st = $(`<div class="hint">已改，默认是「${esc(dn(g.default))}」 <button class="btn link small">恢复默认</button></div>`);
+    st.querySelector("button").onclick = () => choose(g.name, g.default);
+    card.append(st);
+  }
+  return card;
 }
 
 function renderGroup(name) {
   const m = main();
   const g = meta.groups.find((x) => x.name === name);
   const p = proxies[name];
-  if (!g || !p) { m.innerHTML = `<div class="note err">没有这个分组：${esc(name)}（配置和面板版本不一致？）</div>`; return; }
-  m.append($(`<div><p class="small"><a href="#/groups">← 分组与开关</a></p><h1>${esc(name)}</h1><p class="lead">${esc(g.desc)}</p></div>`));
-  const bar = $(`<div class="row" style="margin-bottom:12px"><span>现在走：<b>${esc(p.now)}</b></span>${costBadge(name)}<span class="grow"></span></div>`);
+  if (!g || !p) { m.append($(`<div class="note err">没有这个分组：${esc(name)}（配置和面板版本不一致？）</div>`)); return; }
+  const bar = $(`<div class="row"><span>现在走：<b>${esc(dn(p.now))}</b></span>${costBadge(name)}<span class="grow"></span></div>`);
   const test = $(`<button class="btn">测延迟</button>`);
   test.onclick = () => testAll(p.all, () => renderGroup(name));
   bar.append(test);
   if (g.default && g.default !== p.now) {
-    const reset = $(`<button class="btn">恢复默认（${esc(g.default)}）</button>`);
+    const reset = $(`<button class="btn">恢复默认（${esc(dn(g.default))}）</button>`);
     reset.onclick = () => choose(name, g.default);
     bar.append(reset);
   }
-  m.append(bar);
+  m.innerHTML = "";
+  if (prof()?.pending) m.append(pendingBar());
+  m.append(head(esc(BASE_TITLES[name] || dn(name)), esc(g.desc), ["routes", "线路与规则"]), bar);
   // 分区：跟随开关 / 直连 / 免费的（服务器入口、经服务器的落地）/ 计费的落地
   const kinds = { follow: [], direct: [], free: [], v4: [] };
   for (const n of p.all) {
@@ -409,19 +752,20 @@ function renderGroup(name) {
     else kinds.free.push(n);
   }
   const titles = { follow: "跟随其他开关", direct: "直连（校园网直接出去）",
-    free: meta.mode === "tunnel" ? "经服务器（免费）" : "节点", v4: "校园网 v4 直接连落地（计费，延迟低）" };
+    free: meta.mode === "tunnel" ? "经服务器（免费）" : "节点", v4: "校园网 IPv4 直接连落地（计费，延迟低）" };
   if (name === meta.entry) { titles.free = "服务器入口（校园网 IPv6 连过去，免费）"; titles.follow = "自动"; }
   for (const k of ["follow", "direct", "free", "v4"]) {
     if (!kinds[k].length) continue;
-    m.append($(`<h2>${titles[k]}</h2>`));
-    const grid = $(`<div class="opts"></div>`);
+    const sec = $(`<section class="sec"><h2>${titles[k]}</h2><div class="opts"></div></section>`);
+    const grid = sec.querySelector(".opts");
     for (const n of kinds[k]) {
-      const card = $(`<div class="opt ${n === p.now ? "on" : ""}"><div class="t"><span>${esc(n)}</span>${delayHtml(n)}</div>
-        <div class="d">${esc(optNote(n))}</div><div class="row small">${costBadge(n)}${n === g.default ? `<span class="badge b-muted">默认</span>` : ""}</div></div>`);
+      const card = $(`<button type="button" class="opt ${n === p.now ? "on" : ""}" aria-pressed="${n === p.now}" style="font:inherit;color:inherit;text-align:left">
+        <span class="t"><span>${esc(dn(n))}</span>${delayHtml(n)}</span><span class="d">${esc(optNote(n))}</span>
+        <span class="row small">${costBadge(n)}${n === g.default ? `<span class="badge b-muted">默认</span>` : ""}</span></button>`);
       card.onclick = () => choose(name, n);
       grid.append(card);
     }
-    m.append(grid);
+    m.append(sec);
   }
 }
 
@@ -431,13 +775,13 @@ async function testAll(list, redraw) {
   await Promise.all(list.map(async (n) => {
     try { delays[n] = (await api(`/proxies/${encodeURIComponent(n)}/delay?timeout=6000&url=${encodeURIComponent(DELAY_URL)}`)).delay || 0; }
     catch { delays[n] = 0; }
-    if (route().page === "group") redraw();
+    if (["group", "subs"].includes(route().page)) redraw();
   }));
 }
 
-// ---------- 我的规则 ----------
+// ---------- 我的规则（在「线路与规则」页里） ----------
 const TYPE_NAMES = { domain_suffix: "域名（含子域名）", domain: "只这一个域名", domain_keyword: "域名里包含", ip_cidr: "IP / 网段", process_name: "程序（进程名）" };
-const KIND_NAMES = { direct: "直连", server: "服务器", switch: "跟随总开关", group: "跟随分组", reject: "拒绝" };
+const KIND_NAMES = { direct: "直连", server: "服务器", switch: "跟随主要线路", group: "跟随按应用的设置", reject: "拦截" };
 
 function detectType(v) {
   v = v.trim();
@@ -448,16 +792,18 @@ function detectType(v) {
 function cleanValue(type, v) {
   v = v.trim();
   if (type === "ip_cidr" || type === "process_name") return v;
-  return v.toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split(/[/?#]/)[0].replace(/:\d+$/, "").replace(/^[*.]+/, "").replace(/\.$/, "");
+  v = v.toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").split(/[/?#]/)[0].replace(/:\d+$/, "").replace(/^[*.]+/, "").replace(/\.$/, "");
+  // 粘贴的网址多半带 www.：按「含子域名」匹配时去掉，整个网站（api.、m.……）一起管
+  return type === "domain_suffix" ? v.replace(/^www\.(?=[^.]+\.[^.]+)/, "") : v;
 }
-const targetName = (id) => (userRules?.targets || meta.user_targets).find((t) => t.id === id)?.name || id;
+const targetName = (id) => dn((userRules?.targets || meta.user_targets).find((t) => t.id === id)?.name || id);
 
 function targetSelect(value) {
   const ts = meta.user_targets || [];
   const groups = {};
   for (const t of ts) (groups[t.kind] ||= []).push(t);
   const sel = $(`<select>${Object.entries(groups).map(([k, list]) => `<optgroup label="${KIND_NAMES[k] || k}">${list.map((t) =>
-    `<option value="${esc(t.id)}" ${t.id === value ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</optgroup>`).join("")}</select>`);
+    `<option value="${esc(t.id)}" ${t.id === value ? "selected" : ""}>${esc(dn(t.name))}</option>`).join("")}</optgroup>`).join("")}</select>`);
   return sel;
 }
 const targetDesc = (id) => (meta.user_targets || []).find((t) => t.id === id)?.desc || "";
@@ -479,110 +825,137 @@ async function saveRule(rule) {
   return userRules;
 }
 
-function renderRules() {
-  const m = main();
-  m.append($(`<div><h1>我的规则</h1><p class="lead">在这里加的规则优先级最高：比所有分组都先匹配。保存后 1–2 秒生效，不用重新生成配置，也不用重启。
-    已经建立的连接还按老规则走，刷新网页或重开 App 就会用新规则。</p></div>`));
+// 按网址加一条规则：常用的几个去向做成按钮，其余的在下拉框里
+const QUICK_TARGETS = [["direct", "直连"], ["server", "经服务器"], ["abroad", "走国外线路"], ["reject", "拦截"]];
+let ruleTarget = "direct", ruleDraft = "";
+
+function addRuleCard() {
+  const card = $(`<section class="card big sec" aria-labelledby="add-h"><h2 id="add-h">这个网站走哪里？</h2></section>`);
   if (!meta.user_targets?.length) {
-    m.append($(`<div class="note warn">这份配置没有开「我的规则」${meta.platform === "android" || meta.platform === "ios" ? "（手机上不支持）" : "（生成时设了 user_rules: false）"}。
-      想加规则可以在配置文件里写 <span class="mono">custom_rules</span>，重新生成后导入。</div>`));
-    renderCustomRules(m);
-    return;
+    card.append($(`<p class="hint" style="margin:0">这份配置没有开「我的规则」${meta.platform === "android" || meta.platform === "ios" ? "（手机上不支持）" : "（生成时设了 user_rules: false）"}。
+      想加规则可以在配置文件里写 <span class="mono">custom_rules</span>，重新生成后导入。</p>`));
+    return card;
   }
   if (!helper.rules) {
-    m.append($(`<div class="note err"><b>连不上本地助手（127.0.0.1:${meta.traffic_port || 9091}）</b>，所以现在不能在面板里加规则。<br>${esc(helperHelp())}
-      ${helper.error === "old" ? "<br>（现在运行的是旧版助手，只有流量统计。）" : ""}</div>`));
-    renderCustomRules(m);
-    return;
+    card.append($(`<div class="note err"><b>连不上本地助手（127.0.0.1:${meta.traffic_port || 9091}）</b>，现在不能加规则。${esc(helperHelp())}
+      ${helper.error === "old" ? "（现在运行的是旧版助手，只有流量统计。）" : ""}</div>`));
+    return card;
   }
-
-  const form = $(`<div class="card"><div class="form">
-    <input type="text" id="r-val" placeholder="粘贴网址、域名、IP 或程序名，例如 bilibili.com、chrome.exe">
-    <select id="r-type"><option value="auto">自动识别</option>${Object.entries(TYPE_NAMES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
-    <span id="r-tgt"></span>
-    <button class="btn primary" id="r-add">添加</button>
-    <input type="text" id="r-note" placeholder="备注（可选），例如：学校选课网站" style="grid-column: 1 / 3">
-    <div class="hint" id="r-hint"></div></div></div>`);
-  const tsel = targetSelect("direct");
-  tsel.id = "r-target";
-  form.querySelector("#r-tgt").append(tsel);
-  tsel.style.width = "100%";
-  m.append(form);
-  const val = form.querySelector("#r-val"), type = form.querySelector("#r-type"), hint = form.querySelector("#r-hint"), note = form.querySelector("#r-note");
+  const ts = meta.user_targets;
+  if (!ts.some((t) => t.id === ruleTarget)) ruleTarget = "direct";
+  const val = $(`<input type="text" class="big" style="width:100%" aria-label="网址、域名、IP 或程序名" placeholder="粘贴网址，例如 https://www.bilibili.com/video/…；也可以填 IP 或程序名（chrome.exe）">`);
+  val.value = ruleDraft;
+  const chips = $(`<div class="chips" role="radiogroup" aria-label="去向"></div>`);
+  for (const [id, label] of QUICK_TARGETS) {
+    const t = ts.find((x) => x.id === id);
+    if (!t) continue;
+    const on = ruleTarget === id;
+    const b = $(`<button type="button" role="radio" aria-checked="${on}" class="chip ${on ? "on" : ""}" title="${esc(t.desc)}"><span class="tt"><b>${label}</b></span>
+      ${proxies[t.name] || t.kind === "reject" ? costBadge(t.name) : ""}</button>`);
+    b.onclick = () => { ruleTarget = id; ruleDraft = val.value; render(); };
+    chips.append(b);
+  }
+  const more = targetSelect(ruleTarget);
+  more.prepend(new Option("其他去向……", ""));
+  if (QUICK_TARGETS.some(([id]) => id === ruleTarget)) more.value = "";
+  more.setAttribute("aria-label", "其他去向");
+  more.onchange = () => { if (more.value) { ruleTarget = more.value; ruleDraft = val.value; render(); } };
+  chips.append(more);
+  const type = $(`<select aria-label="匹配方式"><option value="auto">自动识别</option>${Object.entries(TYPE_NAMES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>`);
+  const note = $(`<input type="text" class="grow" placeholder="备注（可不填），例如：学校选课网站" aria-label="备注">`);
+  const add = $(`<button class="btn primary big">添加规则</button>`);
+  const hint = $(`<div class="hint"></div>`);
+  const opts = $(`<div class="row"></div>`);
+  opts.append(type, note, add);
+  card.append(val, chips, hint, opts, $(`<div class="hint">不知道网址？<a href="#/conn">从正在连接的网站里找</a>，点「改规则」。</div>`));
   const current = () => { const t = type.value === "auto" ? detectType(val.value) : type.value; return { type: t, value: cleanValue(t, val.value) }; };
   const preview = () => {
     hint.classList.remove("err");
-    if (!val.value.trim()) { hint.textContent = targetDesc(tsel.value); return; }
+    if (!val.value.trim()) { hint.textContent = `${targetName(ruleTarget)}：${targetDesc(ruleTarget)}`; return; }
     const c = current();
-    const what = { domain_suffix: `${c.value} 及它的所有子域名`, domain: `只有 ${c.value} 这一个域名`, domain_keyword: `域名里含有「${c.value}」的`,
+    const what = { domain_suffix: `${c.value} 和它的所有子域名`, domain: `只有 ${c.value} 这一个域名`, domain_keyword: `域名里含有「${c.value}」的`,
       ip_cidr: `IP ${c.value}`, process_name: `程序 ${c.value} 的全部流量` }[c.type];
-    hint.textContent = `将添加：${what} → ${targetName(tsel.value)}。${targetDesc(tsel.value)}`;
+    hint.textContent = `将添加：${what} → ${targetName(ruleTarget)}。${targetDesc(ruleTarget)}`;
   };
-  val.oninput = type.onchange = tsel.onchange = preview;
+  val.oninput = () => { ruleDraft = val.value; preview(); };
+  type.onchange = preview;
   preview();
-  const add = async () => {
+  const doAdd = async () => {
     if (!val.value.trim()) { val.focus(); return; }
     const c = current();
+    add.disabled = true;
     try {
-      await saveRule({ ...c, target: tsel.value, note: note.value.trim() });
-      toast(`已添加：${c.value} → ${targetName(tsel.value)}，1–2 秒后生效`);
-      val.value = ""; note.value = "";
-      drawList();
-      preview();
-    } catch (e) { hint.textContent = e.message; hint.classList.add("err"); }
+      await saveRule({ ...c, target: ruleTarget, note: note.value.trim() });
+      toast(`已添加：${c.value} → ${targetName(ruleTarget)}，一两秒后生效`);
+      ruleDraft = "";
+      render();
+    } catch (e) { add.disabled = false; hint.textContent = e.message; hint.classList.add("err"); }
   };
-  form.querySelector("#r-add").onclick = add;
-  val.onkeydown = (e) => e.key === "Enter" && add();
+  add.onclick = doAdd;
+  val.onkeydown = (e) => e.key === "Enter" && doAdd();
+  return card;
+}
 
-  const head = $(`<div class="row" style="margin:26px 0 10px"><h2 style="margin:0">已有规则</h2><span class="grow"></span></div>`);
-  const filter = $(`<input type="search" placeholder="搜索">`);
-  const exportBtn = $(`<button class="btn small">导出</button>`);
-  const importBtn = $(`<button class="btn small">导入</button>`);
-  head.append(filter, exportBtn, importBtn);
-  m.append(head);
-  const list = $(`<div></div>`);
-  m.append(list);
-  filter.oninput = () => drawList();
-  exportBtn.onclick = () => {
-    const blob = new Blob([JSON.stringify({ version: 1, rules: userRules.rules.map(({ orphan, ...r }) => r) }, null, 1)], { type: "application/json" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "my-rules.json"; a.click();
-  };
-  importBtn.onclick = () => importRules();
-
-  function drawList() {
-    const f = filter.value.trim().toLowerCase();
-    const rules = (userRules?.rules || []).map((r, i) => ({ ...r, i })).reverse()
-      .filter((r) => !f || [r.value, r.note, targetName(r.target)].join(" ").toLowerCase().includes(f));
-    if (!userRules?.rules.length) { list.innerHTML = `<p class="muted">还没有规则。上面加一条试试，或者去 <a href="#/conn">实时连接</a> 直接从连接上改。</p>`; return; }
-    const t = $(`<table><thead><tr><th>匹配</th><th style="width:260px">去向</th><th>备注</th><th style="width:70px"></th></tr></thead><tbody></tbody></table>`);
-    for (const r of rules) {
-      const tr = $(`<tr><td><span class="mono">${esc(r.value)}</span><div class="small muted">${TYPE_NAMES[r.type] || r.type}${r.added ? " · " + esc(r.added.replace("T", " ").slice(0, 16)) : ""}</div></td>
-        <td class="tg"></td><td class="small">${esc(r.note)}${r.orphan ? `<div class="badge b-bad">这个目标在当前配置里不存在，规则没有生效</div>` : ""}</td>
-        <td><button class="btn small del">删除</button></td></tr>`);
-      const s = targetSelect(r.target);
-      s.style.width = "100%";
-      s.onchange = async () => {
-        try { await saveRule({ type: r.type, value: r.value, target: s.value, note: r.note }); toast(`${r.value} → ${targetName(s.value)}`); drawList(); }
-        catch (e) { toast("保存失败：" + e.message); }
-      };
-      tr.querySelector(".tg").append(s);
-      tr.querySelector(".del").onclick = async () => {
-        try { userRules = await helperApi("/rules/delete", { method: "POST", body: JSON.stringify({ type: r.type, value: r.value }) }); renderNav(); drawList(); toast(`已删除 ${r.value}`); }
-        catch (e) { toast("删除失败：" + e.message); }
-      };
-      t.tBodies[0].append(tr);
-    }
-    list.innerHTML = "";
-    list.append(t, $(`<p class="small muted">保存在 ${esc(userRules.dir)}（user-rules.json）。同一个域名只能有一个去向，重复添加会改成新的。</p>`));
+function rulesSection() {
+  const n = userRules ? userRules.rules.length : 0;
+  const sec = $(`<section class="sec" aria-labelledby="mine-h"><div class="sec-head"><div><h2 id="mine-h">我的规则 <span class="muted" style="font-weight:500">${n ? n + " 条" : ""}</span></h2>
+    <p>优先级最高，比上面所有设置都先看。同一个网站只能有一条，再加会改成新的。</p></div></div></section>`);
+  if (userRules) {
+    const filter = $(`<input type="search" placeholder="搜索" aria-label="搜索规则" style="width:160px">`);
+    const exportBtn = $(`<button class="btn">导出</button>`);
+    const importBtn = $(`<button class="btn">导入</button>`);
+    const acts = $(`<div class="row"></div>`);
+    if (n > 5) acts.append(filter);
+    acts.append(exportBtn, importBtn);
+    sec.querySelector(".sec-head").append(acts);
+    exportBtn.onclick = () => {
+      const blob = new Blob([JSON.stringify({ version: 1, rules: userRules.rules.map(({ orphan, ...r }) => r) }, null, 1)], { type: "application/json" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "my-rules.json"; a.click();
+    };
+    importBtn.onclick = () => importRules();
+    const list = $(`<div></div>`);
+    sec.append(list);
+    const drawList = () => {
+      const f = filter.value.trim().toLowerCase();
+      const rules = (userRules?.rules || []).map((r, i) => ({ ...r, i })).reverse()
+        .filter((r) => !f || [r.value, r.note, targetName(r.target)].join(" ").toLowerCase().includes(f));
+      list.innerHTML = "";
+      if (!userRules?.rules.length) { list.append($(`<p class="hint" style="margin:0">还没有规则。上面粘贴一个网址试试。</p>`)); return; }
+      const box = $(`<div class="list"></div>`);
+      for (const r of rules) {
+        const li = $(`<div class="li"><div class="main"><div class="mono" style="font-size:14px">${esc(r.value)}</div>
+          <div class="d">${TYPE_NAMES[r.type] || r.type}${r.added ? " · " + esc(r.added.replace("T", " ").slice(0, 16)) : ""}${r.note ? " · " + esc(r.note) : ""}</div>
+          ${r.orphan ? `<span class="badge b-bad">这个去向在当前配置里不存在，规则没有生效</span>` : ""}</div>
+          <div class="row tg" style="flex:0 1 260px;flex-wrap:nowrap"><span class="muted" aria-hidden="true">→</span></div>
+          <button class="btn small ghost del" aria-label="删除 ${esc(r.value)}">删除</button></div>`);
+        const s = targetSelect(r.target);
+        s.setAttribute("aria-label", `${r.value} 走哪里`);
+        s.style.minWidth = "0";
+        s.classList.add("grow");
+        s.onchange = async () => {
+          try { await saveRule({ type: r.type, value: r.value, target: s.value, note: r.note }); toast(`${r.value} → ${targetName(s.value)}`); drawList(); }
+          catch (e) { toast("保存失败：" + e.message); }
+        };
+        li.querySelector(".tg").append(s);
+        li.querySelector(".del").onclick = async () => {
+          try { userRules = await helperApi("/rules/delete", { method: "POST", body: JSON.stringify({ type: r.type, value: r.value }) }); toast(`已删除 ${r.value}`); render(); }
+          catch (e) { toast("删除失败：" + e.message); }
+        };
+        box.append(li);
+      }
+      list.append(box, $(`<p class="hint" style="margin:8px 0 0">保存在 ${esc(userRules.dir)}（user-rules.json）。</p>`));
+    };
+    filter.oninput = drawList;
+    drawList();
   }
-  drawList();
-  renderCustomRules(m);
+  renderCustomRules(sec);
+  return sec;
 }
 
 function importRules() {
-  const bg = $(`<div class="modal-bg"><div class="modal"><h3>导入规则</h3>
+  const bg = $(`<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-label="导入规则"><h3>导入规则</h3>
     <p class="small muted">粘贴之前「导出」的内容。会<b>替换</b>现有的全部规则。</p>
-    <textarea rows="10" style="width:100%" class="mono"></textarea><div class="small err-msg" style="color:var(--bad)"></div>
+    <textarea rows="10" class="mono" aria-label="导出的规则"></textarea><div class="small err-msg"></div>
     <div class="actions"><button class="btn cancel">取消</button><button class="btn primary ok">替换现有规则</button></div></div></div>`);
   document.body.append(bg);
   bg.querySelector(".cancel").onclick = () => bg.remove();
@@ -597,11 +970,10 @@ function importRules() {
 
 function renderCustomRules(m) {
   if (!meta.custom_rules?.length) return;
-  m.append($(`<h2>配置文件里的规则（custom_rules）</h2>`));
-  m.append($(`<p class="small muted">写在生成配置用的设置文件里，排在「我的规则」之后、所有分组之前。要改它们得改设置文件再重新生成。</p>`));
-  const t = $(`<table><thead><tr><th>匹配</th><th>去向</th></tr></thead><tbody>${meta.custom_rules.map((r) =>
-    `<tr><td class="mono">${esc(r.match)}</td><td>${esc(r.outbound)}</td></tr>`).join("")}</tbody></table>`);
-  m.append(t);
+  m.append($(`<div><h2 style="margin-top:8px">配置文件里的规则（custom_rules）</h2>
+    <p class="hint" style="margin:2px 0 0">写在生成配置用的设置文件里，排在「我的规则」之后。要改它们得改设置文件再重新生成。</p></div>`));
+  m.append($(`<table><thead><tr><th>匹配</th><th>去向</th></tr></thead><tbody>${meta.custom_rules.map((r) =>
+    `<tr><td class="mono">${esc(r.match)}</td><td>${esc(dn(r.outbound))}</td></tr>`).join("")}</tbody></table>`));
 }
 
 // ---------- 实时连接 ----------
@@ -624,7 +996,7 @@ function ruleText(c) {
 
 function renderConn() {
   const m = main();
-  m.append($(`<div><h1>实时连接</h1><p class="lead">每 2 秒刷新（鼠标停在表格上时暂停）。「实际出口」是这条连接最后从哪出去的；走得不对就点「改规则」，以后同样的连接都按新规则走。</p></div>`));
+  m.append($(`<div><a class="back" href="#/settings">← 设置</a><h1>实时连接</h1><p class="lead">每 2 秒刷新（鼠标停在表格上时暂停）。「实际出口」是这条连接最后从哪出去的；走得不对就点「改规则」，以后同样的连接都按新规则走。</p></div>`));
   const bar = $(`<div class="row" style="margin-bottom:12px"></div>`);
   const filter = $(`<input type="search" placeholder="搜索：域名、程序、分组，如 微信" class="grow">`);
   const paidOnly = $(`<label class="row small" style="gap:4px"><input type="checkbox"> 只看计费的</label>`);
@@ -743,7 +1115,7 @@ const srvSum = (b) => Object.values(b.server || {}).reduce((x, y) => x + y, 0);
 
 function renderTraffic() {
   const m = main();
-  m.append($(`<div><h1>流量统计</h1><p class="lead">按每条连接的实际出口记账，每秒更新，只统计这台电脑。
+  m.append($(`<div><a class="back" href="#/settings">← 设置</a><h1>流量明细</h1><p class="lead">按每条连接的实际出口记账，每秒更新，只统计这台电脑。
     <b>省下的</b> = 本来要走校园网 IPv4 计费、现在免费走掉的流量（上下行合计）。</p></div>`));
   if (!helper.traffic) {
     m.append($(`<div class="note warn">${helper.ok ? "本地助手是旧版，没有流量统计；" : "连不上本地助手。"}${esc(helperHelp())}</div>`));
@@ -782,7 +1154,7 @@ function renderTraffic() {
 // ---------- 固定端口 ----------
 function renderPorts() {
   const m = main();
-  m.append($(`<div><h1>固定端口</h1><p class="lead">每个端口固定走一个出口，不受任何分组和规则影响。在浏览器、指纹浏览器或 App 里把代理设成 127.0.0.1:端口（HTTP 或 SOCKS5 都行）。</p></div>`));
+  m.append($(`<div><a class="back" href="#/settings">← 设置</a><h1>固定端口</h1><p class="lead">每个端口固定走一个出口，不受任何分组和规则影响。在浏览器、指纹浏览器或 App 里把代理设成 127.0.0.1:端口（HTTP 或 SOCKS5 都行）。</p></div>`));
   for (const i of meta.info) m.append($(`<div class="card" style="margin-bottom:10px"><b>${esc(i.name)}</b><p class="small muted" style="margin:6px 0 0">${esc(i.desc)}</p></div>`));
 }
 
@@ -790,7 +1162,7 @@ function renderPorts() {
 function renderHelp() {
   const m = main();
   const tunnel = meta.mode === "tunnel";
-  m.append($(`<div><h1>使用说明</h1><p class="lead">校园网 IPv6 流量不计费、IPv4 计费。这个面板控制你的流量走哪条路。</p></div>`));
+  m.append($(`<div><a class="back" href="#/settings">← 设置</a><h1>常见问题</h1><p class="lead">校园网 IPv6 流量不计费、IPv4 计费。这个面板控制你的流量走哪条路。</p></div>`));
   m.append($(`<div class="glossary">
     <div class="card"><b>直连 v6 <span class="badge b-free">免费</span></b><span class="small muted">校园网用 IPv6 直接访问。国内大网站（B 站、淘宝、腾讯……）多数有 IPv6。</span></div>
     <div class="card"><b>直连 v4 <span class="badge b-paid">计费</span></b><span class="small muted">校园网用 IPv4 直接访问，和不开任何代理一样。网站看到的是校园网 IP。</span></div>
@@ -892,8 +1264,8 @@ async function applyClient() {
 }
 
 function pendingBar() {
-  const bar = $(`<div class="note warn row"><span class="grow"><b>订阅、节点或设置有改动，还没生效。</b>
-    应用时会重新生成配置并重启 sing-box（网络断开几秒）；新配置上不了网会自动换回旧的。</span><button class="btn primary">应用</button></div>`);
+  const bar = $(`<div class="note bar"><span><b>改动还没生效。</b><span class="muted">点「应用」重新生成配置，网络会断开几秒；新配置上不了网会自动换回原来的。</span></span>
+    <button class="btn primary">应用</button></div>`);
   const btn = bar.querySelector("button");
   btn.onclick = async () => {
     btn.disabled = true;
@@ -906,7 +1278,7 @@ function pendingBar() {
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "应用";
-      bar.after($(`<div class="note err">应用失败：${esc(e.message)}</div>`));
+      bar.after($(`<div class="note err">应用失败：${esc(e.message)}（原来的配置没动）</div>`));
     }
   };
   return bar;
@@ -920,9 +1292,9 @@ function needClient(m) {
   }
   if (!client) { m.append($(`<div class="note err">读取设置失败：${esc(helper.error)}</div>`)); return false; }
   if (prof()) return true;
-  const c = $(`<div class="card"><b>还没有在面板里管理过订阅和设置</b>
-    <p class="small muted">现在的配置是用命令行生成的，或者刚装好。开始以后，订阅、节点和设置都在这里管，点「应用」时按这里的内容重新生成配置。
-    以后如果再运行命令行的更新脚本，会用文件里的设置覆盖这里的。</p><button class="btn primary">开始</button></div>`);
+  const c = $(`<div class="card sec"><b>还没有在面板里管理过订阅和设置</b>
+    <p class="hint" style="margin:0">现在的配置是用命令行生成的，或者刚装好。开始以后，订阅、节点和设置都在这里管，点「应用」时按这里的内容重新生成配置。
+    以后如果再运行命令行的更新脚本，会用文件里的设置覆盖这里的。</p><div><button class="btn primary">开始</button></div></div>`);
   c.querySelector("button").onclick = async () => {
     client.profile = { version: 1, settings: {}, subscriptions: [], nodes: [] };
     try { await saveProfile(); render(); } catch (e) { toast("保存失败：" + e.message); }
@@ -932,11 +1304,11 @@ function needClient(m) {
 }
 
 function subModal(s, onSave) {
-  const bg = $(`<div class="modal-bg"><div class="modal"><h3>编辑订阅</h3>
-    <div class="field"><div class="lbl">名字（分组名「📦 名字」）</div><input type="text" class="n" style="width:100%"></div>
-    <div class="field"><div class="lbl">订阅链接</div><input type="text" class="u" style="width:100%"></div>
-    <div class="field"><div class="lbl">排除节点（名字匹配这个正则的不用；留空 = 不排除）</div><input type="text" class="x mono" style="width:100%"></div>
-    <label class="choice small"><input type="checkbox" class="g"> 单独成组（在「国外网站」等分组里多一个「📦 名字」，里面自动选最快）</label>
+  const bg = $(`<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true" aria-label="编辑订阅"><h3>编辑订阅</h3>
+    <div class="field"><label class="lbl" for="sm-n">名字（分组里显示为「📦 名字」）</label><input type="text" id="sm-n" class="n"></div>
+    <div class="field"><label class="lbl" for="sm-u">订阅链接</label><input type="text" id="sm-u" class="u"></div>
+    <div class="field"><label class="lbl" for="sm-x">排除节点（名字匹配这个正则的不用；留空 = 不排除）</label><input type="text" id="sm-x" class="x mono"></div>
+    <label class="choice small"><input type="checkbox" class="g"> 单独成组（在「国外网站」等地方多一个「📦 名字」，里面自动选最快）</label>
     <div class="actions"><button class="btn cancel">取消</button><button class="btn primary ok">保存</button></div></div></div>`);
   bg.querySelector(".n").value = s.name || "";
   bg.querySelector(".u").value = s.url || "";
@@ -954,69 +1326,110 @@ function subModal(s, onSave) {
   document.body.append(bg);
 }
 
+// ---------- 订阅与节点 ----------
+let subsTab = "sub";
+
 function renderSubs() {
   const m = main();
-  m.append($(`<div><h1>订阅与节点</h1><p class="lead">机场订阅和自己的节点都加在这里，它们都是「落地」：在「国外网站」和各个国外分组里选用。
-    ${meta.mode === "tunnel" ? "模式二里落地默认先经免流服务器再出去，所以也免费。" : "节点地址有 IPv6 时用 v6 连过去（免费）。"}
-    改完点上方的「应用」生效。</p></div>`));
+  m.append(head("订阅与节点", `上国外网站用的线路。机场订阅和单个节点都加在这里，加完点「应用」。${meta.mode === "tunnel"
+    ? "有免流服务器时，这些节点默认先经服务器再出去，所以也免费。" : "节点地址有 IPv6 时用 IPv6 连过去，不计费。"}`));
   if (!needClient(m)) return;
   const p = prof();
   if (!neuLib) lib().then(() => route().page === "subs" && render()).catch(() => { });  // 加载完再画一次（排除计数要用它）
 
-  const add = $(`<div class="card"><div class="row"><input type="text" class="grow u" placeholder="订阅链接（https://…）">
-    <input type="text" class="n" placeholder="名字（可不填）" style="width:180px"><button class="btn primary">添加订阅</button></div>
-    <div class="small muted hint" style="margin-top:6px">支持 Clash / mihomo、sing-box、v2rayN（节点链接，可以是 base64）格式。下载由本地助手完成，会经过当前的网络规则。</div></div>`);
-  const hint = add.querySelector(".hint");
-  add.querySelector("button").onclick = async (e) => {
-    const url = add.querySelector(".u").value.trim();
-    if (!/^https?:\/\//i.test(url)) { hint.textContent = "请填 http:// 或 https:// 开头的订阅链接"; hint.style.color = "var(--bad)"; return; }
-    const s = { id: rid(), name: add.querySelector(".n").value.trim(), url, enabled: true };
-    e.target.disabled = true;
-    hint.textContent = "下载中……";
-    try {
-      await fetchSub(s);
-      p.subscriptions.push(s);
-      await changed(`已添加「${s.name}」：${s.proxies.length} 个节点`);
-    } catch (err) {
-      e.target.disabled = false;
-      hint.textContent = "添加失败：" + err.message;
-      hint.style.color = "var(--bad)";
-    }
-  };
+  // 添加：订阅链接 / 节点或服务器（节点链接、Clash 配置、server/setup.sh 的输出）
+  const add = $(`<section class="card big sec" aria-label="添加"><div class="seg" role="tablist" aria-label="添加什么" style="align-self:flex-start">
+    <button type="button" role="tab" data-t="sub">订阅链接</button><button type="button" role="tab" data-t="node">节点或服务器</button></div></section>`);
+  for (const b of add.querySelectorAll("[data-t]")) {
+    const on = b.dataset.t === subsTab;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", on);
+    b.onclick = () => { subsTab = b.dataset.t; render(); };
+  }
+  const hint = $(`<div class="hint"></div>`);
+  if (subsTab === "sub") {
+    const r = $(`<div class="row"><input type="url" class="big grow u" placeholder="粘贴机场的订阅链接，https://…" aria-label="订阅链接">
+      <input type="text" class="big n" placeholder="名字（可不填）" aria-label="订阅名字" style="width:180px"><button class="btn primary big">添加</button></div>`);
+    hint.textContent = "在机场网站上找「复制订阅」。支持 Clash / mihomo、sing-box、v2rayN（节点链接，可以是 base64）格式；下载由本地助手完成，链接只保存在这台电脑上。";
+    r.querySelector("button").onclick = async (e) => {
+      const url = r.querySelector(".u").value.trim();
+      if (!/^https?:\/\//i.test(url)) { hint.textContent = "请填 http:// 或 https:// 开头的订阅链接"; hint.classList.add("err"); return; }
+      const s = { id: rid(), name: r.querySelector(".n").value.trim(), url, enabled: true };
+      e.target.disabled = true;
+      hint.classList.remove("err");
+      hint.textContent = "下载中……";
+      try {
+        await fetchSub(s);
+        p.subscriptions.push(s);
+        await changed(`已添加「${s.name}」：${s.proxies.length} 个节点`);
+      } catch (err) {
+        e.target.disabled = false;
+        hint.textContent = "添加失败：" + err.message;
+        hint.classList.add("err");
+      }
+    };
+    add.append(r, hint);
+  } else {
+    const ta = $(`<textarea class="mono" rows="5" aria-label="节点" placeholder="粘贴节点链接（vless:// vmess:// trojan:// ss:// hy2:// tuic:// anytls://，一行一个）、一段 Clash 配置，或 server/setup.sh 最后输出的那一段"></textarea>`);
+    const b = $(`<button class="btn primary big">添加</button>`);
+    hint.textContent = "粘贴服务器脚本的输出时，会顺便把它设成免流服务器。";
+    b.onclick = async () => {
+      const L = await lib();
+      const r = L.parseSubscription(ta.value);
+      if (!r.proxies.length) { hint.textContent = r.errors[0] || "没有认出节点"; hint.classList.add("err"); return; }
+      const names = new Set(p.nodes.map((x) => x.name));
+      const fresh = r.proxies.filter((x) => !names.has(x.name));
+      p.nodes.push(...fresh);
+      // server/setup.sh 输出的那段带着服务器的 IPv6：直接设成免流服务器
+      const srv = r.settings?.entry_servers;
+      if (srv) {
+        p.settings.entry_servers = { ...(p.settings.entry_servers || {}), ...srv };
+        if (r.settings.entry_default) p.settings.entry_default = r.settings.entry_default;
+      }
+      await changed(`添加了 ${fresh.length} 个节点` + (srv ? `，并把「${Object.values(srv).map((x) => x.label).join("、")}」设为免流服务器` : "")
+        + (r.errors.length ? `，${r.errors.length} 行没认出` : ""));
+    };
+    const r = $(`<div class="row"></div>`);
+    r.append(b, hint);
+    hint.classList.add("grow");
+    add.append(ta, r);
+  }
   m.append(add);
 
+  // 订阅
   const subs = p.subscriptions;
-  const head = $(`<h2 class="row"><span class="grow">订阅（${subs.length}）</span></h2>`);
+  const sec = $(`<section class="sec" aria-labelledby="subs-h"><div class="sec-head"><div><h2 id="subs-h">订阅 <span class="muted" style="font-weight:500">${subs.length || ""}</span></h2></div></div></section>`);
   if (subs.length) {
-    const all = $(`<button class="btn small">全部更新</button>`);
+    const all = $(`<button class="btn">全部更新</button>`);
     all.onclick = async () => {
       all.disabled = true;
+      all.textContent = "更新中……";
       let n = 0;
       for (const s of subs.filter((x) => x.enabled !== false)) {
         try { if (await fetchSub(s)) n++; } catch (err) { s.error = err.message; }
       }
       if (n) await changed(`${n} 个订阅有变化`); else { await saveProfile().catch(() => { }); toast("都是最新的"); render(); }
     };
-    head.append(all);
-  }
-  m.append(head);
-  if (!subs.length) m.append($(`<p class="muted">还没有订阅。</p>`));
+    sec.querySelector(".sec-head").append(all);
+  } else sec.append($(`<p class="hint" style="margin:0">还没有订阅。有机场的话，把订阅链接粘到上面。</p>`));
   for (const s of subs) {
     const ui = s.userinfo;
-    const used = ui && ui.total ? `已用 ${gb((ui.upload || 0) + (ui.download || 0))} / 共 ${gb(ui.total)}` : "";
-    const exp = ui && ui.expire ? `到期 ${new Date(ui.expire * 1000).toISOString().slice(0, 10)}` : "";
+    const used = ui ? (ui.upload || 0) + (ui.download || 0) : 0;
+    const exp = ui && ui.expire ? new Date(ui.expire * 1000).toISOString().slice(0, 10) : "";
     const grp = meta.subscriptions?.find((x) => x.name === s.name);
     let excluded = 0;  // 名字匹配排除规则的（剩余流量、到期时间这类）
     try { const x = s.exclude ?? neuLib?.DEFAULT_EXCLUDE; if (x) excluded = (s.proxies || []).filter((n) => new RegExp(x, "i").test(n.name)).length; } catch { }
-    const card = $(`<div class="card" style="margin-bottom:10px">
-      <div class="row"><b>${esc(s.name)}</b><span class="badge b-muted">${(s.proxies || []).length} 个节点</span>
-        ${excluded ? `<span class="badge b-muted" title="名字匹配排除规则，在「编辑」里改">排除 ${excluded} 个</span>` : ""}${s.format ? `<span class="badge b-muted">${esc(s.format)}</span>` : ""}${s.enabled === false ? `<span class="badge b-paid">已停用</span>` : ""}
-        ${s.skipped ? `<span class="badge b-paid">${s.skipped} 个不支持</span>` : ""}<span class="grow"></span><span class="acts row"></span></div>
-      <div class="small muted" style="margin-top:4px">${esc(hostOf(s.url))} · 更新于 ${when(s.updated)}${used ? " · " + used : ""}${exp ? " · " + exp : ""}</div>
-      ${s.error ? `<div class="small" style="color:var(--bad)">上次更新失败：${esc(s.error)}</div>` : ""}
-      <div class="row grp" style="margin-top:8px"></div></div>`);
+    const card = $(`<div class="card sec">
+      <div class="row" style="align-items:flex-start"><div class="grow" style="min-width:220px">
+        <div class="row" style="gap:8px"><b>${esc(s.name)}</b>${s.enabled === false ? `<span class="badge b-paid">已停用</span>` : ""}
+          ${excluded ? `<span class="badge b-muted" title="名字匹配排除规则，在「编辑」里改">排除 ${excluded} 个</span>` : ""}${s.skipped ? `<span class="badge b-paid">${s.skipped} 个不支持</span>` : ""}</div>
+        <div class="hint">${(s.proxies || []).length} 个节点 · ${esc(hostOf(s.url))} · ${when(s.updated)} 更新${s.format ? " · " + esc(s.format) : ""}</div></div>
+        <div class="row acts" style="gap:6px"></div></div>
+      ${ui && ui.total ? `<div class="sec" style="gap:6px"><div class="usage"><i style="width:${Math.min(100, Math.round(used / ui.total * 100))}%"></i></div>
+        <div class="row hint"><span class="grow">已用 ${gb(used)}B，共 ${gb(ui.total)}B</span>${exp ? `<span>${exp} 到期</span>` : ""}</div></div>` : exp ? `<div class="hint">${exp} 到期</div>` : ""}
+      ${s.error ? `<div class="hint err">上次更新失败：${esc(s.error)}</div>` : ""}</div>`);
     const acts = card.querySelector(".acts");
-    const btn = (t, fn) => { const b = $(`<button class="btn small">${t}</button>`); b.onclick = () => fn(b); acts.append(b); };
+    const btn = (t, fn, cls = "") => { const b = $(`<button class="btn small ${cls}">${t}</button>`); b.onclick = () => fn(b); acts.append(b); };
     btn("更新", async (b) => {
       b.disabled = true;
       try { (await fetchSub(s)) ? await changed(`「${s.name}」有变化`) : (toast("没有变化"), await saveProfile(), render()); }
@@ -1024,81 +1437,105 @@ function renderSubs() {
     });
     btn(s.enabled === false ? "启用" : "停用", () => { s.enabled = s.enabled === false; changed(); });
     btn("编辑", () => subModal(s, () => changed()));
-    btn("删除", () => { if (confirm(`删除订阅「${s.name}」？`)) { p.subscriptions = subs.filter((x) => x !== s); changed(); } });
+    btn("删除", () => { if (confirm(`删除订阅「${s.name}」？`)) { p.subscriptions = subs.filter((x) => x !== s); changed(); } }, "ghost");
     if (grp && proxies[grp.group]) {
-      const g = card.querySelector(".grp");
-      g.append($(`<span class="small muted">「${esc(grp.group)}」现在用</span>`), groupSelect(grp.group, "grow"));
+      const g = $(`<div class="row" style="flex-wrap:nowrap"><span class="small muted" style="white-space:nowrap">「${esc(dn(grp.group))}」现在用</span></div>`);
+      const sel = groupSelect(grp.group, "grow");
+      sel.style.minWidth = "0";
+      sel.setAttribute("aria-label", `${dn(grp.group)} 现在用的节点`);
       const t = $(`<button class="btn small">测速</button>`);
       t.onclick = () => testAll(proxies[grp.group].all, () => { if (route().page === "subs") render(); });
-      g.append(t);
+      g.append(sel, t);
+      card.append(g);
       const ds = proxies[grp.group].all.filter((n) => delays[n] !== undefined);
-      if (ds.length) g.after($(`<div class="small" style="margin-top:6px">${ds.map((n) => `${esc(n)} ${delayHtml(n)}`).join(" · ")}</div>`));
+      if (ds.length) card.append($(`<div class="nodes">${ds.map((n) => `<div class="node"><span>${esc(dn(n))}</span>${delayHtml(n)}</div>`).join("")}</div>`));
     }
-    m.append(card);
+    sec.append(card);
   }
+  m.append(sec);
 
-  m.append($(`<h2>手动添加的节点（${p.nodes.length}）</h2>`));
-  const paste = $(`<div class="card"><textarea class="mono" rows="4" style="width:100%" placeholder="粘贴节点链接（vless:// vmess:// trojan:// ss:// hy2:// tuic:// anytls://，一行一个）、一段 Clash 配置，或 server/setup.sh 最后输出的那段"></textarea>
-    <div class="row" style="margin-top:8px"><button class="btn primary">添加节点</button><span class="small muted hint"></span></div></div>`);
-  paste.querySelector("button").onclick = async () => {
-    const L = await lib();
-    const r = L.parseSubscription(paste.querySelector("textarea").value);
-    const h = paste.querySelector(".hint");
-    if (!r.proxies.length) { h.textContent = r.errors[0] || "没有认出节点"; h.style.color = "var(--bad)"; return; }
-    const names = new Set(p.nodes.map((x) => x.name));
-    const fresh = r.proxies.filter((x) => !names.has(x.name));
-    p.nodes.push(...fresh);
-    // server/setup.sh 输出的那段带着服务器的 IPv6：直接设成免流服务器（模式二）
-    const srv = r.settings?.entry_servers;
-    if (srv) {
-      p.settings.entry_servers = { ...(p.settings.entry_servers || {}), ...srv };
-      if (r.settings.entry_default) p.settings.entry_default = r.settings.entry_default;
-    }
-    await changed(`添加了 ${fresh.length} 个节点` + (srv ? `，并把「${Object.values(srv).map((x) => x.label).join("、")}」设为免流服务器` : "")
-      + (r.errors.length ? `，${r.errors.length} 行没认出` : ""));
-  };
-  m.append(paste);
+  // 手动添加的节点
   if (p.nodes.length) {
-    const t = $(`<table style="margin-top:10px"><thead><tr><th>名字</th><th>类型</th><th>地址</th><th></th></tr></thead><tbody></tbody></table>`);
+    const own = $(`<section class="sec" aria-labelledby="own-h"><h2 id="own-h">手动添加的节点 <span class="muted" style="font-weight:500">${p.nodes.length}</span></h2><div class="list"></div></section>`);
+    const servers = p.settings.entry_servers || {};
     for (const n of p.nodes) {
-      const tr = $(`<tr><td>${esc(n.name)}</td><td class="small">${esc(n.type === "_singbox" ? n.outbound?.type : n.type)}</td>
-        <td class="mono">${esc(n.server)}:${esc(n.port)}</td><td><button class="btn small">删除</button></td></tr>`);
-      tr.querySelector("button").onclick = () => { p.nodes = p.nodes.filter((x) => x !== n); changed(); };
-      t.tBodies[0].append(tr);
+      const li = $(`<div class="li"><div class="main"><div class="t">${esc(n.name)}</div>
+        <div class="d">${esc(n.type === "_singbox" ? n.outbound?.type : n.type)} · <span class="mono">${esc(n.server)}:${esc(n.port)}</span>${servers[n.server] ? " · 也是免流服务器（在「设置」里管理）" : ""}</div></div>
+        <button class="btn small ghost">删除</button></div>`);
+      li.querySelector("button").onclick = () => { p.nodes = p.nodes.filter((x) => x !== n); changed(); };
+      own.querySelector(".list").append(li);
     }
-    m.append(t);
+    m.append(own);
   }
 }
 
+// ---------- 设置 ----------
 function renderSettings() {
   const m = main();
-  m.append($(`<div><h1>设置</h1><p class="lead">改完点上方的「应用」生效。面板密钥、安装位置这些和安装绑定的设置不在这里改。</p></div>`));
-  if (!needClient(m)) { if (helper.client) renderUpdate(m); return; }
+  m.append(head("设置", "平时不用来这里。改了运行方式、服务器或端口要点「应用」。"));
+  const ok = needClient(m);
+  if (ok) settingsMain(m);
+  renderUpdate(m);
+
+  const tools = [["conn", "实时连接", "每条连接实际从哪儿出去；走得不对可以直接改规则"], ["traffic", "流量明细", "按天、按月、按服务器看免费和计费流量"],
+    ["logs", "日志", "sing-box 的警告和错误：连不上节点、DNS 出错都在这里"]];
+  if (meta.info.length) tools.push(["ports", "固定端口", "每个端口固定走一个出口，给指纹浏览器等用"]);
+  tools.push(["help", "常见问题", "名词解释、分流顺序和常见问题"]);
+  m.append($(`<section class="sec" aria-labelledby="diag-h"><div class="sec-head"><div><h2 id="diag-h">诊断</h2><p>出问题、想细看时用。</p></div></div>
+    <div class="list">${tools.map(([k, t, d]) => `<a class="li" href="#/${k}"><div class="main"><div class="t">${t}</div><div class="d">${d}</div></div><span class="muted">${icon("next")}</span></a>`).join("")}</div></section>`));
+
+  const more = $(`<section class="sec" aria-labelledby="more-h"><h2 id="more-h">其他</h2><div class="row"><a class="btn" href="#/welcome">重新看新手引导</a></div></section>`);
+  if (ok) {
+    const s = prof().settings;
+    const adv = $(`<details class="card"><summary class="small">高级：直接改全部设置（JSON）——分组默认值、显示名、固定端口、custom_rules 等，见文档 docs/config.md</summary>
+      <textarea class="mono" rows="16" style="width:100%;margin-top:12px" aria-label="全部设置（JSON）"></textarea><div class="row" style="margin-top:8px"><button class="btn primary">保存</button><span class="hint"></span></div></details>`);
+    adv.querySelector("textarea").value = JSON.stringify(s, null, 2);
+    adv.querySelector("button").onclick = () => {
+      let v;
+      try { v = JSON.parse(adv.querySelector("textarea").value); } catch (e) { adv.querySelector(".hint").textContent = "JSON 格式不对：" + e.message; return; }
+      if (!v || typeof v !== "object" || Array.isArray(v)) { adv.querySelector(".hint").textContent = "要是一个 { … } 对象"; return; }
+      for (const k of FORCED) delete v[k];
+      prof().settings = v;
+      changed("已保存");
+    };
+    more.append(adv);
+  }
+  m.append(more);
+}
+
+/** 运行方式、免流服务器、本机代理 */
+function settingsMain(m) {
   const p = prof(), s = p.settings;
   const servers = s.entry_servers || {};
   const ids = Object.keys(servers);
 
-  m.append($(`<h2>运行模式</h2>`));
-  m.append($(`<div class="card"><b>${ids.length ? "模式二 · 自带服务器" : "模式一 · v6 优先省流"}</b>
-    <p class="small muted" style="margin:4px 0 0">${ids.length
-      ? "国内有 IPv6 的网站 v6 直连；只有 IPv4 的和国外的经你的服务器（v6 进、v4 出），都免费。删掉下面全部服务器就回到模式一。"
-      : "不用服务器：有 IPv6 的网站走 v6（免费），只有 IPv4 的照常计费。在下面加一台自己的双栈服务器就是模式二。"}</p></div>`));
+  const sec = $(`<section class="sec" aria-labelledby="mode-h"><h2 id="mode-h">运行方式</h2><div class="pick" role="radiogroup" aria-label="运行方式"></div></section>`);
+  const pick = sec.querySelector(".pick");
+  const opt = (on, t, d, fn) => {
+    const b = $(`<button type="button" role="radio" aria-checked="${on}" class="chip ${on ? "on" : ""}"><b>${t}</b><span>${d}</span></button>`);
+    b.onclick = fn;
+    pick.append(b);
+  };
+  const srvBox = $(`<div class="list"></div>`);
+  opt(!ids.length, "只省 IPv6", "不用服务器。有 IPv6 的网站免费，只有 IPv4 的照常计费。", () => {
+    if (!ids.length) return;
+    if (!confirm("删掉全部免流服务器、回到只省 IPv6？服务器的节点还留在「订阅与节点」里。")) return;
+    s.entry_servers = {};
+    changed("已改为只省 IPv6，点「应用」后生效");
+  });
+  opt(!!ids.length, "用自己的服务器", "只有 IPv4 的网站经服务器出去，也免费。需要一台有 IPv6 的 VPS。", () => {
+    if (!ids.length) srvBox.querySelector(".v6")?.focus();
+  });
 
-  m.append($(`<h2>免流服务器</h2>`));
-  m.append($(`<p class="small muted">你自己的双栈 VPS。它的节点要先在「订阅与节点」里（订阅或手动添加都行），这里选中它，填上它的 IPv6 地址：
-    电脑用 IPv6 连过去（服务器的入站要监听 ::），它再用 IPv4 访问网站。只认 Hysteria2、TUIC、VLESS Reality、AnyTLS 这几种节点。</p>`));
-  if (ids.length) {
-    const t = $(`<table><thead><tr><th>名字</th><th>节点地址</th><th>IPv6 地址</th><th>也当落地</th><th></th></tr></thead><tbody></tbody></table>`);
-    for (const id of ids) {
-      const v = servers[id];
-      const tr = $(`<tr><td>${esc(v.label)}</td><td class="mono">${esc(id)}</td><td class="mono">${esc(v.v6)}</td>
-        <td><input type="checkbox" ${v.landing ? "checked" : ""}></td><td><button class="btn small">删除</button></td></tr>`);
-      tr.querySelector("input").onchange = (e) => { v.landing = e.target.checked; changed(); };
-      tr.querySelector("button").onclick = () => { delete servers[id]; s.entry_servers = servers; changed(); };
-      t.tBodies[0].append(tr);
-    }
-    m.append(t);
+  for (const id of ids) {
+    const v = servers[id];
+    const li = $(`<div class="li"><div class="main"><div class="t">${esc(v.label)}</div><div class="d mono">${esc(id)} · ${esc(v.v6)}</div></div>
+      <label class="check"><input type="checkbox" ${v.landing ? "checked" : ""}>也当国外线路用</label><button class="btn small ghost">删除</button></div>`);
+    li.querySelector("input").onchange = (e) => { v.landing = e.target.checked; changed(); };
+    li.querySelector("button").onclick = () => { delete servers[id]; s.entry_servers = servers; changed(); };
+    srvBox.append(li);
   }
+  // 加服务器：节点要先在「订阅与节点」里（订阅或手动添加都行），这里选中它，填上它的 IPv6 地址
   const cand = new Map();
   if (!neuLib) lib().then(() => route().page === "settings" && render()).catch(() => { });
   // 和生成配置时一样取节点（停用的订阅、被排除的「剩余流量」之类不算）
@@ -1106,11 +1543,14 @@ function renderSettings() {
   for (const x of all) {
     if (x.server && /^[\d.]+$/.test(x.server) && !servers[x.server] && !cand.has(x.server)) cand.set(x.server, x.name);
   }
-  const addSrv = $(`<div class="card row" style="margin-top:10px"><select class="srv">${[...cand].map(([ip, n]) =>
-    `<option value="${esc(ip)}">${esc(ip)}（${esc(n)}）</option>`).join("")}<option value="">手动填节点地址……</option></select>
-    <input type="text" class="ip mono" placeholder="节点的 IPv4 地址" style="width:150px;display:${cand.size ? "none" : ""}">
-    <input type="text" class="v6 mono" placeholder="服务器的 IPv6 地址" style="width:220px">
-    <input type="text" class="lb" placeholder="名字，如 港机" style="width:120px"><button class="btn primary">加为免流服务器</button></div>`);
+  const addSrv = $(`<div class="li" style="flex-direction:column;align-items:stretch;gap:10px">
+    <div class="hint">${ids.length ? "再加一台：" : ""}服务器上先运行部署脚本，把输出粘到「订阅与节点 → 节点或服务器」最省事（会自动加到这里）。也可以从已有的节点里选，填上服务器的 IPv6 地址：</div>
+    <div class="row"><select class="srv grow" aria-label="服务器的节点">${[...cand].map(([ip, n]) => `<option value="${esc(ip)}">${esc(ip)}（${esc(n)}）</option>`).join("")}
+      <option value="">手动填节点地址……</option></select>
+      <input type="text" class="ip mono" placeholder="节点的 IPv4 地址" aria-label="节点的 IPv4 地址" style="width:160px;display:${cand.size ? "none" : ""}">
+      <input type="text" class="v6 mono" placeholder="服务器的 IPv6 地址" aria-label="服务器的 IPv6 地址" style="width:220px">
+      <input type="text" class="lb" placeholder="名字，如 港机" aria-label="服务器名字" style="width:130px"><button class="btn primary">加为免流服务器</button></div>
+    <div class="hint">只认 Hysteria2、TUIC、VLESS Reality、AnyTLS 这几种节点；服务器的入站要监听 ::（IPv6）。</div></div>`);
   const sel = addSrv.querySelector(".srv"), ipIn = addSrv.querySelector(".ip");
   sel.onchange = () => { ipIn.style.display = sel.value ? "none" : ""; };
   addSrv.querySelector("button").onclick = () => {
@@ -1119,15 +1559,18 @@ function renderSettings() {
     if (!v6.includes(":")) return toast("请填服务器的 IPv6 地址");
     if (!label) return toast("请起个名字");
     s.entry_servers = { ...servers, [ip]: { v6, label } };
-    changed(`已加「${label}」，应用后进入模式二`);
+    changed(`已加「${label}」，点「应用」后生效`);
   };
-  m.append(addSrv);
+  srvBox.append(addSrv);
+  sec.append(srvBox);
+  m.append(sec);
 
-  m.append($(`<h2>其他</h2>`));
-  const other = $(`<div class="card"><div class="field"><div class="lbl">代理端口（系统代理、浏览器插件或程序里填 127.0.0.1:端口，HTTP 和 SOCKS5 都行）</div>
-    <input type="text" class="port mono" style="width:120px"></div>
-    <label class="choice small" style="display:${ids.length ? "flex" : "none"}"><input type="checkbox" class="via">
-      订阅里的落地先经免流服务器再出去（免费）。关掉 = 校园网 IPv4 直接连落地（计费，延迟低）</label></div>`);
+  const other = $(`<section class="sec" aria-labelledby="proxy-h"><h2 id="proxy-h">本机代理</h2><div class="list">
+    <div class="li"><label class="main" for="port"><div class="t">代理端口</div>
+      <div class="d">大部分程序不用设。命令行工具、浏览器插件要代理时填 127.0.0.1 和这个端口（HTTP、SOCKS5 都行）。</div></label>
+      <input type="text" id="port" class="port mono" inputmode="numeric" style="width:110px"></div>
+    <div class="li via-li" style="display:${ids.length ? "flex" : "none"}"><label class="check main"><input type="checkbox" class="via">
+      订阅里的节点先经免流服务器再出去（免费）。关掉 = 校园网 IPv4 直接连节点（计费，延迟低）</label></div></div></section>`);
   const port = other.querySelector(".port");
   port.value = s.main_port ?? client.defaults.main_port ?? "";
   port.onchange = () => {
@@ -1140,41 +1583,28 @@ function renderSettings() {
   via.checked = s.landings_via_entry !== false;
   via.onchange = () => { s.landings_via_entry = via.checked; changed(); };
   m.append(other);
-
-  m.append($(`<h2>高级（全部设置，JSON）</h2>`));
-  const adv = $(`<details class="card"><summary class="small">展开：分组默认值、显示名、固定端口、custom_rules 等，见文档 docs/config.md</summary>
-    <textarea class="mono" rows="16" style="width:100%;margin-top:10px"></textarea><div class="row"><button class="btn primary">保存</button><span class="small hint"></span></div></details>`);
-  adv.querySelector("textarea").value = JSON.stringify(s, null, 2);
-  adv.querySelector("button").onclick = () => {
-    let v;
-    try { v = JSON.parse(adv.querySelector("textarea").value); } catch (e) { adv.querySelector(".hint").textContent = "JSON 格式不对：" + e.message; return; }
-    if (!v || typeof v !== "object" || Array.isArray(v)) { adv.querySelector(".hint").textContent = "要是一个 { … } 对象"; return; }
-    for (const k of FORCED) delete v[k];
-    p.settings = v;
-    changed("已保存");
-  };
-  m.append(adv);
-  renderUpdate(m);
 }
 
-/** 设置页底部：版本与更新。本地助手查 GitHub 上的最新发布，点「更新」由它下载、校验、安装（不要管理员） */
+/** 版本与更新。本地助手查 GitHub 上的最新发布，点「更新」由它下载、校验、安装（不要管理员） */
 function renderUpdate(m) {
-  m.append($(`<h2>版本与更新</h2>`));
-  const card = $(`<div class="card"><div class="row"><span class="grow">当前版本 <b class="cur">${esc(helper.version || "—")}</b></span>
-    <button class="btn small chk">检查更新</button></div><div class="small body" style="margin-top:8px">读取中……</div></div>`);
-  const body = card.querySelector(".body");
+  const sec = $(`<section class="sec" aria-labelledby="ver-h"><h2 id="ver-h">版本与更新</h2>
+    <div class="card sec"><div class="row"><div class="grow" style="min-width:220px"><div style="font-weight:600">当前版本 <span class="cur">${esc(helper.version || "—")}</span></div>
+      <div class="hint body">读取中……</div></div><button class="btn chk">检查更新</button></div></div></section>`);
+  const card = sec.querySelector(".card"), body = sec.querySelector(".body");
   const show = (v) => {
     card.querySelector(".cur").textContent = v.current === "0" ? "1.0.0 或更早" : v.current;
-    body.innerHTML = "";
-    if (v.error) body.append($(`<div style="color:var(--bad)">${esc(v.error)}</div>`));
-    else if (!v.latest) body.append($(`<span class="muted">还没检查过。</span>`));
-    else if (!v.available) body.append($(`<span class="muted">已经是最新版本（${when(v.checked)} 检查过；本地助手每天自动查一次）。</span>`));
+    card.querySelector(".upd")?.remove();
+    body.classList.remove("err");
+    if (v.error) { body.textContent = v.error; body.classList.add("err"); }
+    else if (!v.latest) body.textContent = "还没检查过。";
+    else if (!v.available) body.textContent = `已是最新（${when(v.checked)} 检查过；每天自动检查一次）。有新版本时概览页和这里会提示，点一下就更新。`;
+    else body.textContent = `有新版本 ${v.latest}。`;
     if (!v.available) return;
-    const box = $(`<div><b>有新版本 ${esc(v.latest)}</b> · <a href="${esc(v.url)}" target="_blank" rel="noopener">在 GitHub 上看</a>
-      <pre class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto;margin:8px 0;background:var(--bg);padding:10px;border-radius:8px">${esc(v.notes || "（没有说明）")}</pre>
-      <p class="muted" style="margin:0 0 8px">换上新的面板、生成器、规则集和本地助手，不需要管理员密码；配置、订阅与设置、我的规则都保留。
+    const box = $(`<div class="upd sec"><div><b>有新版本 ${esc(v.latest)}</b> · <a href="${esc(v.url)}" target="_blank" rel="noopener">在 GitHub 上看</a></div>
+      <pre class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto;margin:0;background:var(--sunken);padding:12px;border-radius:10px">${esc(v.notes || "（没有说明）")}</pre>
+      <p class="hint" style="margin:0">换上新的面板、生成器、规则集和本地助手，不需要管理员密码；配置、订阅与设置、我的规则都保留。
       安装包先按发布里的 SHA256 校验，不对就不装。装完点一次页面上方的「应用」，新生成器才会用上。</p>
-      <button class="btn primary">更新到 ${esc(v.latest)}</button></div>`);
+      <div><button class="btn primary big">更新到 ${esc(v.latest)}</button></div></div>`);
     const b = box.querySelector("button");
     b.onclick = async () => {
       b.disabled = true;
@@ -1191,12 +1621,12 @@ function renderUpdate(m) {
       } catch (e) {
         b.disabled = false;
         b.textContent = `更新到 ${v.latest}`;
-        box.append($(`<div style="color:var(--bad);margin-top:6px">更新失败：${esc(e.message)}（原来的版本没动）</div>`));
+        box.append($(`<div class="hint err">更新失败：${esc(e.message)}（原来的版本没动）</div>`));
       }
     };
-    body.append(box);
+    card.append(box);
   };
-  card.querySelector(".chk").onclick = async (e) => {
+  sec.querySelector(".chk").onclick = async (e) => {
     e.target.disabled = true;
     body.textContent = "检查中……";
     try { show(await helperApi("/update/check", { method: "POST" })); } catch (err) { body.textContent = "检查失败：" + err.message; }
@@ -1204,12 +1634,12 @@ function renderUpdate(m) {
   };
   if (!helper.client) body.textContent = "本地助手是旧版，不支持自动更新。" + helperHelp();
   else helperApi("/update").then(show).catch((e) => { body.textContent = "读取失败：" + e.message; });
-  m.append(card);
+  m.append(sec);
 }
 
 function renderLogs() {
   const m = main();
-  m.append($(`<div><h1>日志</h1><p class="lead">sing-box 实时输出的日志（警告和错误）。连不上某个节点、规则集加载失败、DNS 出错都会在这里出现。</p></div>`));
+  m.append($(`<div><a class="back" href="#/settings">← 设置</a><h1>日志</h1><p class="lead">sing-box 实时输出的日志（警告和错误）。连不上某个节点、规则集加载失败、DNS 出错都会在这里出现。</p></div>`));
   const bar = $(`<div class="row" style="margin-bottom:10px"><input type="search" class="grow" placeholder="筛选"><label class="small"><input type="checkbox"> 暂停</label>
     <button class="btn small">清空</button></div>`);
   const box = $(`<div class="card mono" style="height:62vh;overflow:auto;white-space:pre-wrap;line-height:1.5"></div>`);
@@ -1233,23 +1663,23 @@ function renderLogs() {
   };
 }
 
-/** 概览上的「规则 / 全局 / 直连」：Clash API 的 mode */
+/** 概览上的「智能分流 / 全部走代理 / 全部直连」：Clash API 的 mode */
 function modeSwitch() {
-  const modes = [["Rule", "规则", "按分组和规则分流（平时用这个）"], ["Global", "全局", "全部走「国外网站」的选择，国内网站也绕出去"],
-    ["Direct", "直连", "全部校园网直连：有 v6 走 v6，没有的走 v4（计费）"]];
+  const modes = [["Rule", "智能分流", "按线路与规则分流（平时用这个）"], ["Global", "全部走代理", "所有网站都走「国外网站」的选择，国内网站也绕出去"],
+    ["Direct", "全部直连", "全部校园网直连：有 IPv6 走 IPv6，没有的走 IPv4（计费）"]];
   const cur = (clashMode || "Rule").toLowerCase();
-  const card = $(`<div class="card stat"><div class="k">代理模式</div><div class="row" style="margin:6px 0 4px;gap:6px"></div><div class="s"></div></div>`);
+  const seg = $(`<div class="seg" role="group" aria-label="代理方式"></div>`);
   for (const [v, t, d] of modes) {
     const on = cur === v.toLowerCase();
-    const b = $(`<button class="btn small ${on ? "primary" : ""}">${t}</button>`);
-    if (on) card.querySelector(".s").textContent = d;
+    const b = $(`<button type="button" class="${on ? "on" : ""}" aria-pressed="${on}" title="${d}">${t}</button>`);
     b.onclick = async () => {
-      try { await api("/configs", { method: "PATCH", body: JSON.stringify({ mode: v }) }); clashMode = v; toast(`已切到「${t}」模式`); render(); }
+      if (on) return;
+      try { await api("/configs", { method: "PATCH", body: JSON.stringify({ mode: v }) }); clashMode = v; toast(`已切到「${t}」`); render(); }
       catch (e) { if (e.message !== "401") toast("切换失败：" + e.message); }
     };
-    card.querySelector(".row").append(b);
+    seg.append(b);
   }
-  return card;
+  return seg;
 }
 
 // ---------- 登录与启动 ----------
@@ -1257,11 +1687,11 @@ function renderLogin(msg = "") {
   stopTimer();
   const root = document.getElementById("root");
   root.innerHTML = "";
-  const box = $(`<div class="card login"><h1>校园网 v6 免流面板</h1>
-    <p class="muted">输入面板密钥。它是生成配置时的 <span class="mono">clash_api_secret</span>：在你的 config.yaml 里，网页生成器下载 Windows 配置时也会显示。</p>
-    <input type="password" id="sec" placeholder="面板密钥" autocomplete="current-password">
-    <button class="btn primary" id="go">进入</button>
-    <p class="small" style="color:var(--bad)">${esc(msg)}</p></div>`);
+  const box = $(`<div class="card big login"><div class="row"><span class="logo">v6</span><b>校园网 v6 免流</b></div>
+    <h1>输入面板密钥</h1>
+    <p class="muted" style="margin:0">用「校园网 v6 免流」App 打开会自动登录。用浏览器打开时要输入密钥：它是生成配置时的 <span class="mono">clash_api_secret</span>，安装时也会显示。</p>
+    <label class="sr" for="sec">面板密钥</label><input type="password" id="sec" class="big" placeholder="面板密钥" autocomplete="current-password">
+    <button class="btn primary big" id="go">进入</button><p class="hint err" style="margin:0">${esc(msg)}</p></div>`);
   root.append(box);
   const go = () => { secret = box.querySelector("#sec").value.trim(); try { localStorage.setItem("neu-secret", secret); } catch { } start(); };
   box.querySelector("#go").onclick = go;
@@ -1280,10 +1710,12 @@ async function start() {
   await checkHelper();
   await Promise.all([loadRules(), loadClient()]);
   if (helper.client && helper.update && !helper.update.latest) {
-    // 助手刚启动、还没查过新版本：现在查一次，有新版本就在侧栏和概览上提示
+    // 助手刚启动、还没查过新版本：现在查一次，有新版本就在菜单和概览上提示
     helperApi("/update").then((v) => { helper.update = { latest: v.latest, available: v.available }; if (v.available) render(); }).catch(() => { });
   }
-  document.getElementById("root").innerHTML = `<div class="app"><nav></nav><main><div class="wrap"></div></main></div>`;
+  document.getElementById("root").innerHTML = `<div class="app"><nav aria-label="主菜单"></nav><main><div class="wrap"></div></main></div>`;
+  // 第一次打开（还没加过订阅、节点和服务器）：先看新手引导
+  if (shouldWelcome() && route().page === "home") history.replaceState(null, "", location.pathname + location.search + "#/welcome");
   window.onhashchange = render;
   render();
 }

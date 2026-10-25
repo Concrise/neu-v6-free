@@ -149,7 +149,7 @@ func install(o installOpts) int {
 		}
 	}
 	if out, err := exec.Command(p.SingBox(), "check", "--disable-color", "-c", p.Config()).CombinedOutput(); err != nil {
-		say("安装失败：sing-box 检查配置没通过：%s", trimErr(string(out), 800))
+		say("安装失败：sing-box 检查配置没通过：%s", cmdErr(out, err))
 		return 1
 	}
 

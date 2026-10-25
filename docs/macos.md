@@ -115,7 +115,7 @@ sudo mac/uninstall.sh --purge    # 全部删除
 | 面板打不开 | `sudo launchctl print system/local.neu-v6-free \| grep state` 看服务是否在运行；日志 `/usr/local/var/neu-v6-free/sing-box.log` |
 | 面板提示「连不上本地助手」 | `curl http://127.0.0.1:9091/health`；`sudo launchctl kickstart -k system/local.neu-v6-free` 重启；日志 `sudo tail /usr/local/var/neu-v6-free/helper.log`；还不行就重新安装 |
 | `mac/update.sh` 说 sing-box 检查没通过 | 错误信息里有具体是哪一项；旧配置没动，修好设置再运行 |
-| 某个网站打不开 | 面板「实时连接」搜索它，看实际出口；点「改规则」换一个 |
+| 某个网站打不开 | 面板「线路与规则」粘贴网址换个去向；或「设置 → 诊断 → 实时连接」搜索它，看实际出口，点「改规则」 |
 | 想暂时关掉 | 面板「概览」→「暂停」，或打开 `http://127.0.0.1:9091/` 点「暂停」；在那里重新启用 |
 
 ## 不装后台服务：用 sing-box 官方 App

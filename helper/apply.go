@@ -261,7 +261,7 @@ func (h *Helper) applyDir(src string) (obj, error) {
 	protect(staged)
 	if out, err := exec.Command(h.p.SingBox(), "check", "--disable-color", "-c", staged).CombinedOutput(); err != nil {
 		os.Remove(staged)
-		return nil, bad("sing-box 检查没通过，旧配置没动：%s", trimErr(string(out), 800))
+		return nil, bad("sing-box 检查没通过，旧配置没动：%s", cmdErr(out, err))
 	}
 	backup := h.p.Config() + ".prev"
 	if err := copyFile(h.p.Config(), backup, 0o600); err != nil { // 有密钥和节点密码，和 config.json 一样只给管理员

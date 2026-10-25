@@ -168,6 +168,14 @@ func trimErr(s string, n int) string {
 	return s
 }
 
+// 外部命令出错时给人看的原因：有输出就用输出（最后一段），程序根本没跑起来（找不到、没权限）就用错误本身
+func cmdErr(out []byte, err error) string {
+	if s := trimErr(string(out), 800); s != "" {
+		return s
+	}
+	return err.Error()
+}
+
 // 1.1.x 自动升级时，迁移脚本（安装包里的 helper.py / helper.ps1）把新版安装包解压在 .migrate-* 里运行安装程序
 func removeMigrateStages(p Paths) {
 	for _, d := range uniq(p.Etc, p.Bin) {
