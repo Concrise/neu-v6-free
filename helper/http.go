@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
+	"time"
 )
 
 // 只监听 127.0.0.1。/rules、/profile、/fetch、/apply、/update 都要带和 Clash API 相同的密钥；
@@ -136,6 +139,24 @@ func (h *Helper) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.reply(w, r, 200, data)
+
+	case path == "/ip/owner" && m == "GET":
+		w.Header().Set("Cache-Control", "no-store")
+		if c.Secret == "" || !h.authorized(r, false) {
+			h.reply(w, r, 401, obj{"error": "密钥不对"})
+			return
+		}
+		ip, err := netip.ParseAddr(r.URL.Query().Get("ip"))
+		if err == nil {
+			_, err = ownerQuery(ip)
+		}
+		if err != nil {
+			h.reply(w, r, 400, obj{"error": "只能识别公网 IPv6 地址"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+		defer cancel()
+		h.reply(w, r, 200, cachedOwner(ctx, ip))
 
 	case (path == "/pause" || path == "/resume") && m == "POST":
 		if !h.authorized(r, true) {

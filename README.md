@@ -43,7 +43,8 @@
 - **实时连接**（设置 → 诊断）：看每个连接是哪个程序发起的、为什么走这条路、免费还是计费；走得不对点「改规则」。
 - **流量统计**（macOS、Windows）：本月 v6 直连省了多少、经服务器免流省了多少、v4 计费用了多少。
   点击概览中的流量卡片，可以看各网站的流量排名和占比，支持切换月份。网站明细从升级后开始记录，只保存在本机，保留最近 3 个月，查看需要面板密钥；升级前及无法归属的流量单独合并显示。
-  从 1.4.0 更新到 1.4.1 后，请点面板上方的「应用」，启用修正后的 IPv6 判断规则；订阅、设置和分组选项继续保留。
+  更新后请点面板上方的「应用」，启用新版的国内域名识别和 IPv6 判断规则；订阅、设置和分组选项继续保留。
+  排名和实时连接中的纯 IPv6 地址会尝试补充网络服务商及 ASN。信息来自 Team Cymru 的 DNS 查询，仅发送 /64 网络前缀；查询失败不影响联网和统计，网络所属机构也不等同于具体网站。
 - **日志**：sing-box 的警告和错误实时显示，节点连不上、规则集出错一眼看到。
 - **只有第一次安装要管理员权限**：之后更新配置交给后台的本地助手，不用再输密码。
 - **自动检查更新**：本地助手每天查一次 GitHub 上的新版本，面板里一键更新（下载后按 SHA256 校验，不用管理员密码，订阅、设置、我的规则都保留）。
@@ -183,8 +184,9 @@ personal/           作者自用的配置（可以当填写示例参考）
 - 生成的配置里有你的节点密码和面板密钥，不要发到群里或公开。
 - 面板和本地助手只监听 `127.0.0.1`，都要求面板密钥；本地助手只接受面板页面的跨域请求，更新接口不接受任何网页发来的请求。
 - 本地助手以管理员身份运行。它安装新配置前会检查配置里所有文件路径都在安装目录内，并用 `sing-box check` 验证，不通过就不动旧配置。
-- 规则集来自 [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat)。
+- 国内域名识别采用 [blackmatrix7 ChinaMaxNoIP](https://github.com/blackmatrix7/ios_rule_script/tree/master/rule/Shadowrocket/ChinaMaxNoIP)，合并 `ChinaMaxNoIP.list` 与 `ChinaMaxNoIP_Domain.list` 的精确域名、域名后缀和关键词规则，转换为 sing-box 原生格式。`USER-AGENT` 匹配不适用于 sing-box 网络层，未纳入转换；原始名单、转换脚本与 GPLv2 许可随规则源码包提供。
+- 国内 IP 和其他服务分组仍使用 [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat)。ChinaMaxNoIP 只负责识别国内，出口仍按 IPv6 判断与用户选择决定，不将名单里的 `DIRECT` 照搬为强制直连。
 
 ## 许可证
 
-[MIT](LICENSE)
+项目代码使用 [MIT](LICENSE)。随包提供的 ChinaMaxNoIP 规则数据使用 [GPLv2](licenses/GPL-2.0.txt)，sing-box 使用 GPLv3。

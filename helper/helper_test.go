@@ -3,9 +3,11 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -244,6 +246,57 @@ func TestTrafficSitesAuthorization(t *testing.T) {
 	h.handle(w, httptest.NewRequest("GET", "/traffic/sites?kind=v6", nil))
 	if w.Code != 401 {
 		t.Fatal("没有设置密钥时也不能公开网站明细")
+	}
+}
+
+func TestIPv6Owner(t *testing.T) {
+	ip := netip.MustParseAddr("2606:4700:4700::1111")
+	query, err := ownerQuery(ip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := ownerQuery(netip.MustParseAddr("2606:4700:4700::abcd"))
+	if query != other {
+		t.Fatal("同一 /64 不应发送不同主机地址")
+	}
+	got, err := lookupOwner(context.Background(), ip, func(_ context.Context, name string) ([]string, error) {
+		switch name {
+		case query:
+			return []string{"13335 | 2606:4700::/32 | US | arin | 2011-11-01"}, nil
+		case "AS13335.asn.cymru.com":
+			return []string{"13335 | US | arin | 2010-07-14 | CLOUDFLARENET - Cloudflare, Inc."}, nil
+		default:
+			t.Fatalf("意外查询：%s", name)
+			return nil, nil
+		}
+	})
+	if err != nil || got.ASN != "AS13335" || got.Provider != "CLOUDFLARENET - Cloudflare, Inc." {
+		t.Fatalf("网络归属解析不对：%+v，%v", got, err)
+	}
+	for _, s := range []string{"::1", "fc00::1", "fe80::1", "2001:db8::1", "192.0.2.1", "::ffff:192.0.2.1"} {
+		if _, err := ownerQuery(netip.MustParseAddr(s)); err == nil {
+			t.Errorf("不应向外查询 %s", s)
+		}
+	}
+	h := &Helper{}
+	h.cur.Store(&Conf{Secret: "test-only", Origins: map[string]bool{"http://127.0.0.1:29090": true}})
+	for _, tc := range []struct {
+		token, origin, ip string
+		code              int
+	}{
+		{"", "", ip.String(), 401},
+		{"Bearer test-only", "https://example.com", ip.String(), 401},
+		{"Bearer test-only", "", "::1", 400},
+		{"Bearer test-only", "", "not-an-ip", 400},
+	} {
+		r := httptest.NewRequest("GET", "/ip/owner?ip="+tc.ip, nil)
+		r.Header.Set("Authorization", tc.token)
+		r.Header.Set("Origin", tc.origin)
+		w := httptest.NewRecorder()
+		h.handle(w, r)
+		if w.Code != tc.code {
+			t.Errorf("%+v：返回 %d", tc, w.Code)
+		}
 	}
 }
 

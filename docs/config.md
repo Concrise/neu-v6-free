@@ -73,6 +73,6 @@ mac 和 windows 会顺便下载规则集到 `rules/`，所以生成时要能访�
 | `rules_dir` / `panel_dir` | `/usr/local/etc/neu-v6-free/…` | macOS 安装位置，要和 `mac/install.sh` 的 `NAME` 一致 |
 | `windows_panel_dir` / `windows_rules_dir` | `C:/neu-v6-free/…` | Windows 安装位置，安装目录 = 面板目录的上一级 |
 | `cache_file` | `neu-v6.cache.db` | sing-box 缓存文件（相对 sing-box 工作目录） |
-| `rule_set_base` | MetaCubeX | 规则集下载地址 |
+| `rule_set_base` | MetaCubeX | 国内 IP 与其他服务分组的规则集地址；国内域名主名单使用单独转换的 ChinaMaxNoIP |
 | `mac_app` | `false` | macOS 用 sing-box 官方 App 而不是后台服务（在线规则集、没有网页面板） |
 | `tun` | `true` | 是否接管全部流量（TUN） |

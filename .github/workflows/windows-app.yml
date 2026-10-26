@@ -22,7 +22,7 @@ jobs:
         with:
           go-version-file: go.mod
       - name: 检查配置生成逻辑
-        run: node --test lib/build.test.js
+        run: node --test lib/build.test.js lib/china-max.test.js
       - name: 检查、编译
         run: |
           v=$(node -p 'require("./package.json").version')

@@ -153,6 +153,7 @@
   .site-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 20px; border-top: 1px solid var(--line); }
   .site-row:first-child { border-top: 0; }
   .site-name { overflow-wrap: anywhere; font-weight: 550; }
+  [data-ip-owner] { overflow-wrap: anywhere; }
   .site-track { height: 5px; background: var(--sunken); border-radius: 3px; margin-top: 8px; overflow: hidden; }
   .site-track i { display: block; height: 100%; border-radius: inherit; background: var(--site-color); }
   .site-size { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -280,6 +281,31 @@ async function helperApi(path, opt = {}) {
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
   return body;
+}
+
+// 页面查询不阻塞统计显示；同一个 IP 只排队一次，限制同时请求的数量。
+const ipOwners = new Map(), ownerQueue = [];
+let ownerActive = 0;
+function ownerInfo(ip) {
+  if (ipOwners.has(ip)) return ipOwners.get(ip);
+  const result = new Promise((resolve) => ownerQueue.push({ ip, resolve }));
+  if (ipOwners.size >= 512) ipOwners.clear();
+  ipOwners.set(ip, result);
+  const next = () => {
+    while (ownerActive < 4 && ownerQueue.length) {
+      const job = ownerQueue.shift();
+      ownerActive++;
+      helperApi("/ip/owner?ip=" + encodeURIComponent(job.ip)).catch(() => ({})).then(job.resolve).finally(() => { ownerActive--; next(); });
+    }
+  };
+  next();
+  return result;
+}
+const ownerHTML = (ip) => String(ip).includes(":") ? `<div class="small muted" data-ip-owner="${esc(ip)}">服务商识别中……</div>` : "";
+function fillOwners(box) {
+  for (const el of box.querySelectorAll("[data-ip-owner]")) ownerInfo(el.dataset.ipOwner).then((o) => {
+    if (el.isConnected) el.textContent = o.provider ? `网络服务商：${o.provider} · ${o.asn}` : "网络服务商：暂未识别";
+  });
 }
 
 async function checkHelper() {
@@ -1033,6 +1059,7 @@ function renderConn() {
   m.append(bar);
   const table = $(`<table><thead><tr><th>目标</th><th>程序</th><th>为什么走这条</th><th>实际出口</th><th class="num">流量</th><th></th></tr></thead><tbody></tbody></table>`);
   m.append(table);
+  m.append($(`<p class="hint">纯 IPv6 目标可显示网络服务商和 ASN，不能据此确定具体网站。数据来自 <a href="https://www.team-cymru.com/ip-asn-mapping" target="_blank" rel="noopener">Team Cymru</a>，查询只包含 IPv6 网络前缀。</p>`));
   // 鼠标停在表格上时不重画：否则每 2 秒换一遍行，点「改规则」会点空
   let data = [], paused = false, hovering = false;
   table.onmouseenter = () => { hovering = true; stat.textContent += " · 已暂停刷新"; };
@@ -1048,13 +1075,14 @@ function renderConn() {
     for (const c of rows.slice(0, 300)) {
       const md = c.metadata, target = md.host || md.destinationIP;
       const via = c.chains.slice(1).reverse().join(" → ");
-      const tr = $(`<tr><td><span class="mono">${esc(target)}</span><div class="small muted">${esc(md.network)} ${esc(md.destinationPort)}</div></td>
+      const tr = $(`<tr><td><span class="mono">${esc(target)}</span>${ownerHTML(target)}<div class="small muted">${esc(md.network)} ${esc(md.destinationPort)}</div></td>
         <td class="small">${esc(procName(md))}</td><td class="small">${esc(ruleText(c))}</td>
         <td><div>${esc(c.chains[0])} ${costBadge(c.chains[0])}</div>${via ? `<div class="small muted">${esc(via)}</div>` : ""}</td>
         <td class="num small">↓${fmt(c.download)}<br>↑${fmt(c.upload)}</td><td><button class="btn small">改规则</button></td></tr>`);
       tr.querySelector("button").onclick = () => ruleFromConn(c, data);
       table.tBodies[0].append(tr);
     }
+    fillOwners(table);
   };
   filter.oninput = draw;
   paidOnly.querySelector("input").onchange = draw;
@@ -1164,13 +1192,16 @@ function renderSites(kind) {
       const months = [...new Set([current, requested, ...d.months])].sort().reverse();
       select.replaceChildren(...months.map((key) => new Option(key, key, false, key === month)));
       const sum = d.items.reduce((n, item) => n + item.bytes, 0), rest = Math.max(0, d.total - sum);
-      const row = (rank, site, n) => `<div class="site-row"><span class="muted small">${rank}</span><div><div class="site-name">${esc(site)}</div>
+      const row = (rank, site, n) => `<div class="site-row"><span class="muted small">${rank}</span><div><div class="site-name">${esc(site)}</div>${ownerHTML(site)}
         <div class="site-track"><i style="width:${pct(n, d.total)}%"></i></div></div><div class="site-size">${gb(n)}B<small>${pct(n, d.total).toFixed(1)}%</small></div></div>`;
       box.innerHTML = `<div class="card stat"><div class="k">${esc(month)} · ${type[0]}</div><div class="v" style="color:var(${type[1]})">${bigSize(d.total)}</div><div class="s">网站排名前 100 名</div></div>
         ${d.items.length || rest > 0 ? `<div class="list">${d.items.map((item, i) => row(i + 1, item.site, item.bytes)).join("")}
           ${rest > 0 ? row("—", "其他 / 未按网站记录的流量", rest) : ""}</div>` : `<div class="card muted">这个月还没有这类网站流量。</div>`}
         <p class="hint">从 ${esc(String(d.since).replace("T", " "))} 起按网站记录。升级前的流量、未进入前 100 名的网站，以及采样之间已关闭、无法归属的连接，合并在「其他 / 未按网站记录的流量」中。
-        明细只保存在这台电脑上，查看需要面板密钥。</p>`;
+        明细只保存在这台电脑上，查看需要面板密钥。</p>
+        ${d.items.some((i) => i.site.includes(":")) ? `<p class="hint">纯 IPv6 条目会查询所属网络，显示服务商和 ASN，不能据此确定具体网站。
+          数据来自 <a href="https://www.team-cymru.com/ip-asn-mapping" target="_blank" rel="noopener">Team Cymru</a>，通过 DNS 查询 /64 网络前缀，不发送完整地址或域名；暂时查不到时保留原地址。</p>` : ""}`;
+      fillOwners(box);
     } catch (e) {
       if (!box.isConnected || month !== requested) return;
       box.innerHTML = e.message === "not found" || e.message === "HTTP 404"

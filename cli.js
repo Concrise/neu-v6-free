@@ -11,9 +11,11 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import yaml from "./lib/js-yaml.mjs";
-import { PLATFORMS, build, rsTag, ruleSetRefs, ruleSetUrl, DEFAULTS } from "./lib/build.js";
+import { PLATFORMS, build, rsTag, ruleSetRefs, ruleSetUrl, DEFAULTS, CHINA_MAX_REF } from "./lib/build.js";
+import { CHINA_MAX_SOURCES, convertChinaMax } from "./lib/china-max.js";
 
 // 面板在浏览器里生成配置要用的模块，随面板一起装（panel/lib/）
 const PANEL_LIB = ["js-yaml.mjs", "groups.js", "convert.js", "subscription.js", "build.js"];
@@ -47,11 +49,17 @@ async function fetchText(url, ua = "clash.meta") {
 }
 
 /** 规则集下载到 dest；某个失败时保留旧文件，没有旧文件则报错。 */
-async function downloadRuleSets(base, dest, settings) {
+async function downloadRuleSets(base, dest, settings, out) {
   fs.mkdirSync(dest, { recursive: true });
   for (const ref of ruleSetRefs("mac", settings)) {
     const target = path.join(dest, `${rsTag(ref)}.srs`);
     try {
+      if (ref === CHINA_MAX_REF) {
+        const cn = await chinaMaxRuleSet(out);
+        fs.copyFileSync(cn.binary, target);
+        fs.copyFileSync(cn.sources, path.join(dest, "china-max-no-ip-sources.zip"));
+        continue;
+      }
       const r = await fetch(ruleSetUrl(base, ref), { signal: AbortSignal.timeout(60000) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const buf = Buffer.from(await r.arrayBuffer());
@@ -110,7 +118,7 @@ async function main() {
       fs.chmodSync(pf, 0o600);
     }
     if (platform === "mac" || platform === "windows") {
-      await downloadRuleSets(settings.rule_set_base || DEFAULTS.rule_set_base, path.join(dir, "rules"), settings);
+      await downloadRuleSets(settings.rule_set_base || DEFAULTS.rule_set_base, path.join(dir, "rules"), settings, a.out);
     }
     // 「我的规则」的空文件：安装 / 更新脚本只补缺的，不会覆盖已经加过的规则
     const userSets = config.route.rule_set.filter((r) => r.tag.startsWith("user-"));
@@ -143,6 +151,50 @@ async function main() {
     const groups = config.outbounds.filter((o) => o.type === "selector").length;
     console.log(`已生成 ${cfgPath}（${mode === "tunnel" ? "模式二·自带服务器" : "模式一·v6 优先直连"}，${config.outbounds.length} 个出站、${groups} 个分组）`);
   }
+  if (a.package) {
+    const cn = await chinaMaxRuleSet(a.out);
+    for (const [src, name] of [[cn.binary, "china-max-no-ip.srs"], [cn.sources, "china-max-no-ip-sources.zip"]]) {
+      fs.copyFileSync(src, path.join(a.out, name));
+      addSum(a.out, name);
+    }
+  }
+}
+
+let chinaMaxBuild;
+function chinaMaxRuleSet(out) {
+  return chinaMaxBuild ||= (async () => {
+    const texts = await Promise.all(CHINA_MAX_SOURCES.map(async (url) => {
+      try { return await fetchText(url); }
+      catch {
+        // 部分 TUN 网络会重置 Node 的 TLS 连接；这里只为固定的公开规则源用系统 curl 重试。
+        return execFileSync("curl", ["--noproxy", "*", "--fail", "--silent", "--show-error", "--location", "--retry", "2", "--max-time", "30", url], { encoding: "utf8", maxBuffer: 16*1024*1024 });
+      }
+    }));
+    const { ruleSet, counts } = convertChinaMax(...texts);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "neu-china-max-"));
+    try {
+      fs.writeFileSync(path.join(dir, "ChinaMaxNoIP.list"), texts[0]);
+      fs.writeFileSync(path.join(dir, "ChinaMaxNoIP_Domain.list"), texts[1]);
+      fs.writeFileSync(path.join(dir, "china-max-no-ip.json"), JSON.stringify(ruleSet));
+      fs.copyFileSync(path.join(ROOT, "licenses/GPL-2.0.txt"), path.join(dir, "LICENSE"));
+      fs.copyFileSync(path.join(ROOT, "LICENSE"), path.join(dir, "converter-LICENSE.txt"));
+      fs.copyFileSync(path.join(ROOT, "lib/china-max.js"), path.join(dir, "converter.mjs"));
+      fs.writeFileSync(path.join(dir, "build-rule.mjs"), `import fs from 'node:fs';\nimport {convertChinaMax} from './converter.mjs';\nconsole.log(JSON.stringify(convertChinaMax(fs.readFileSync('ChinaMaxNoIP.list','utf8'),fs.readFileSync('ChinaMaxNoIP_Domain.list','utf8')).ruleSet));\n`);
+      fs.writeFileSync(path.join(dir, "NOTICE.txt"), `ChinaMaxNoIP — blackmatrix7/ios_rule_script\n规则数据按上游 GPL-2.0 分发；转换程序按 converter-LICENSE.txt 分发。\n来源：\n${CHINA_MAX_SOURCES.join("\n")}\n\n转换时间：${new Date().toISOString()}\n修改：合并两份名单，转换 DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD 为 sing-box 规则，去重排序。\n条目数：${JSON.stringify(counts)}\nUSER-AGENT 的 ${counts.user_agent} 条无法由 sing-box 网络层匹配，未纳入转换结果。\n\n重建：node build-rule.mjs > china-max-no-ip.json\nsing-box rule-set compile china-max-no-ip.json -o china-max-no-ip.srs\n`);
+      const target = `${process.platform === "win32" ? "windows" : process.platform}-${{ x64: "amd64", ia32: "386" }[process.arch] || process.arch}`;
+      const compiler = await singBox(out, target);
+      execFileSync(compiler, ["rule-set", "compile", path.join(dir, "china-max-no-ip.json"), "-o", path.join(dir, "china-max-no-ip.srs")], { stdio: "pipe" });
+      const cache = path.join(out, ".cache");
+      fs.mkdirSync(cache, { recursive: true });
+      const binary = path.join(cache, "china-max-no-ip.srs"), sources = path.resolve(cache, "china-max-no-ip-sources.zip");
+      fs.copyFileSync(path.join(dir, "china-max-no-ip.srs"), binary);
+      fs.rmSync(sources, { force: true });
+      fs.rmSync(path.join(dir, "china-max-no-ip.srs"));
+      execFileSync("tar", ["-a", "-cf", sources, "-C", dir, "."]);
+      console.log(`ChinaMaxNoIP：${counts.domain} 条精确域名、${counts.domain_suffix} 条域名后缀、${counts.domain_keyword} 条关键词；${counts.user_agent} 条 USER-AGENT 不适用于 sing-box。`);
+      return { binary, sources };
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  })();
 }
 
 // 安装程序里自带的 sing-box：固定用测试过的版本（新的大版本常常改配置格式）。
